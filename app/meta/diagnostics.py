@@ -18,7 +18,8 @@ from ..config import settings
 from ..db import kv_get, rows
 from ..metrics import REEL_INSIGHT_METRICS
 from .client import (REQUIRED_SCOPES, UNNEEDED_SCOPES, CallResult, GraphClient, debug_token,
-                     ig_ids_from_debug, parse_insights, scrub)
+                     parse_insights, scrub)
+from .discovery import discover, granular_summary
 from .oauth import active_token, login_token
 
 ACCOUNT_METRICS = ["reach", "views", "accounts_engaged", "total_interactions", "profile_views", "follows_and_unfollows"]
@@ -58,7 +59,16 @@ def run(conn: sqlite3.Connection, transport: httpx.BaseTransport | None = None, 
                            scopes=scopes,
                            missing_scopes=[s for s in REQUIRED_SCOPES if s not in scopes],
                            unneeded_scopes=[s for s in scopes if s in UNNEEDED_SCOPES],
-                           granular_ig_ids=ig_ids_from_debug(r.data or {})))
+                           granular_scopes=granular_summary(d)))
+        # 1a. Все способы найти Instagram-аккаунт — какие реально работают с этим токеном
+        if r.ok:
+            with GraphClient(ltoken, transport=transport) as lc:
+                found = discover(lc, d)
+            for p in found.probes:
+                steps.append({"step": f"Поиск аккаунта: {p.method}", "ok": p.ok, "http_status": p.http_status,
+                              "path": p.endpoint, "summary": f"найдено: {p.found}" + (f"; {p.note}" if p.note else ""),
+                              "error": {"code": p.error_code, "subcode": p.error_subcode, "kind": p.error_kind,
+                                        "message": p.message} if not p.ok else None})
 
     ig_id = kv_get(conn, "ig_user_id")
     with GraphClient(token, transport=transport) as c:
@@ -130,6 +140,7 @@ def run(conn: sqlite3.Connection, transport: httpx.BaseTransport | None = None, 
 
 CAPABILITY_STEPS = {
     "me_accounts": lambda n: n.startswith("Страницы с Instagram"),
+    "account_discovery": lambda n: n.startswith("Поиск аккаунта: Проверка профиля"),
     "profile": lambda n: n == "Профиль Instagram",
     "media": lambda n: n.startswith("Список публикаций"),
     "reel_insights": lambda n: n.startswith("Insights Reels:"),

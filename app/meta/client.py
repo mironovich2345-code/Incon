@@ -320,11 +320,15 @@ def debug_token(token: str, transport: httpx.BaseTransport | None = None) -> Cal
 
 
 def ig_ids_from_debug(data: dict) -> list[str]:
-    """Instagram-аккаунты, к которым выдан instagram_basic (granular_scopes.target_ids)."""
+    """ID Instagram-аккаунтов из granular_scopes.target_ids любого instagram-разрешения.
+    Пустой список — не ошибка: Meta не показывает target_ids, если доступ выдан ко всем объектам."""
+    ids: list[str] = []
     for g in (data.get("data", {}) or {}).get("granular_scopes", []) or []:
-        if g.get("scope") in {"instagram_basic", "instagram_manage_insights"} and g.get("target_ids"):
-            return [str(t) for t in g["target_ids"]]
-    return []
+        if str(g.get("scope") or "").startswith("instagram"):
+            for t in g.get("target_ids") or []:
+                if str(t) not in ids:
+                    ids.append(str(t))
+    return ids
 
 
 def check_app_credentials(transport: httpx.BaseTransport | None = None) -> dict:

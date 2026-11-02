@@ -272,8 +272,9 @@ def test_login_fails_if_token_type_unknown(conn, prod):
 
 
 def test_login_rejects_page_token_type(conn, prod):
-    with pytest.raises(oauth.OAuthError, match="Неподдерживаемый"):
+    with pytest.raises(oauth.LoginFailure) as e:
         oauth.complete_login(conn, "CODE", transport=_suat_router(token_type="PAGE"))
+    assert e.value.reason == "unsupported_token_type"
 
 
 def test_capabilities_summary():

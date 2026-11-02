@@ -214,6 +214,15 @@ CREATE TABLE IF NOT EXISTS diagnostic_runs (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Обезличенные отчёты о попытках входа через Meta (без токенов, кодов OAuth, ID и имён)
+CREATE TABLE IF NOT EXISTS login_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ok INTEGER NOT NULL,
+    reason TEXT,
+    report_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,
     value TEXT

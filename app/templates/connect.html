@@ -31,6 +31,30 @@
   </div>
 </section>
 
+{% if attempt %}
+<section class="card" id="login-attempt">
+  <h2>Последняя попытка подключения <small>{{ attempt.at }} · <a href="/meta/login-attempts.json" target="_blank">JSON</a></small></h2>
+  <p><span class="tag {{ 'ok' if attempt.reason == 'ok' else 'error' }}">{{ 'успешно' if attempt.reason == 'ok' else 'не выполнено' }}</span>
+     <b>{{ attempt.reason_text }}</b> {{ attempt.detail or '' }}</p>
+  <p class="muted">Этап: {{ attempt.stage }}{% if attempt.token_type %} · тип токена: {{ attempt.token_type }}{% endif %}
+    {% if attempt.candidates is defined %} · найдено аккаунтов: {{ attempt.candidates }}, подтверждено: {{ attempt.verified_candidates }}{% endif %}</p>
+  {% if attempt.scopes %}<p class="muted">Разрешения токена: {{ attempt.scopes|join(', ') }}</p>{% endif %}
+  {% if attempt.granular_scopes %}<p class="muted">granular_scopes:
+    {% for g in attempt.granular_scopes %}{{ g.scope }} ({{ 'target_ids: ' ~ g.target_ids if g.target_ids else 'без target_ids' }}){{ '; ' if not loop.last }}{% endfor %}</p>{% endif %}
+  {% if attempt.probes %}
+  <div class="scroll"><table class="dense">
+    <thead><tr><th>Способ поиска</th><th>Запрос (шаблон)</th><th>HTTP</th><th>Найдено</th><th>Ошибка Meta</th><th>Примечание</th></tr></thead>
+    <tbody>{% for p in attempt.probes %}
+      <tr><td>{{ p.method }}</td><td><code>{{ p.endpoint }}</code></td><td>{{ p.http_status if p.http_status is not none else '—' }}</td>
+      <td><span class="tag {{ 'ok' if p.found else ('not_checked' if p.ok else 'error') }}">{{ p.found }}</span></td>
+      <td><small>{% if p.error_code %}code {{ p.error_code }}{% if p.error_subcode %}/{{ p.error_subcode }}{% endif %} · {{ p.message }}{% endif %}</small></td>
+      <td><small>{{ p.note or '' }}</small></td></tr>
+    {% endfor %}</tbody></table></div>
+  {% endif %}
+  <p class="muted">Отчёт обезличен: токены, коды авторизации, ID и имена аккаунтов не сохраняются.</p>
+</section>
+{% endif %}
+
 <section class="card" id="diagnostics">
   <h2>Диагностика {% if report %}<small>{{ report.started_at }} · {{ 'без ошибок' if report.ok else 'есть проблемы' }} · <a href="/meta/diagnostics.json" target="_blank">JSON</a></small>{% endif %}</h2>
   {% if report %}

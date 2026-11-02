@@ -160,15 +160,17 @@ def test_login_system_user_without_pages_uses_granular_ids(conn, meta_env):
 
 def test_login_no_instagram_keeps_old_tokens(conn, meta_env):
     security.save_token(conn, "meta_user", "old", "OLDTOKEN", key=meta_env)
-    with pytest.raises(oauth.OAuthError, match="Не найден"):
+    with pytest.raises(oauth.LoginFailure) as e:
         oauth.complete_login(conn, "CODE", transport=router(pages=False, granular=None))
+    assert e.value.reason == "no_instagram_found"
     assert security.load_token(conn, "meta_user", "old", key=meta_env) == "OLDTOKEN"
 
 
 def test_login_wrong_username_selection(conn, meta_env, monkeypatch):
     monkeypatch.setattr(settings, "meta_ig_username", "someone_else")
-    with pytest.raises(oauth.OAuthError, match="someone_else"):
+    with pytest.raises(oauth.LoginFailure) as e:
         oauth.complete_login(conn, "CODE", transport=router())
+    assert e.value.reason == "username_mismatch" and "someone_else" not in str(e.value)
 
 
 def test_exchange_error_scrubs_secrets(meta_env):
@@ -394,7 +396,7 @@ def test_web_callback_user_denied(web):
     r = client.get("/meta/login", follow_redirects=False)
     state = dict(httpx.URL(r.headers["location"]).params)["state"]
     r = client.get(f"/meta/callback?state={state}&error=access_denied&error_reason=user_denied")
-    assert "отменили вход" in r.text
+    assert "Вход отменён" in r.text
 
 
 def test_web_callback_success(web, monkeypatch):

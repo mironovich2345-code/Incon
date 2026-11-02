@@ -30,7 +30,7 @@ from ..config import settings
 from ..db import kv_get, kv_set
 from ..security import load_token, replace_tokens
 from .client import (CONDITIONAL_SCOPES, REQUIRED_SCOPES, UNNEEDED_SCOPES, GraphClient, GraphError,
-                     debug_token, exchange_code, exchange_long_lived, ig_ids_from_debug, scrub)
+                     debug_token, exchange_code, exchange_long_lived, ig_ids_from_debug, scrub)  # noqa: F401
 
 STATE_TTL = 600
 STATE_COOKIE = "ci_oauth_state"
@@ -68,9 +68,68 @@ def _ts(v) -> datetime | None:
     return datetime.fromtimestamp(int(v)) if v else None
 
 
+# Понятные причины неудачного подключения (показываются в интерфейсе).
+REASONS = {
+    "state_invalid": "Проверка безопасности входа не пройдена (state). Начните вход заново кнопкой на этой странице.",
+    "user_denied": "Вход отменён или разрешения не выданы в окне Meta.",
+    "meta_error": "Meta вернула ошибку в ответ на вход.",
+    "no_code": "Meta не вернула код авторизации.",
+    "exchange_failed": "Не удалось обменять код авторизации на токен (проверьте META_APP_SECRET и Redirect URI).",
+    "debug_token_failed": "Не удалось проверить токен через debug_token (проверьте META_APP_ID и META_APP_SECRET).",
+    "token_invalid": "Meta выдала недействительный токен.",
+    "unsupported_token_type": "Тип токена не поддерживается (ожидается USER или SYSTEM_USER).",
+    "long_lived_failed": "Не удалось получить долгоживущий токен.",
+    "no_instagram_scopes": "В токене нет ни одного Instagram-разрешения: конфигурация входа не выдаёт доступ к Instagram.",
+    "no_instagram_found": "Вход выполнен, но ни один способ не вернул Instagram-аккаунт.",
+    "profile_unreadable": "Instagram-аккаунт найден, но его профиль не читается с выданным токеном.",
+    "username_mismatch": "Аккаунт из META_IG_USERNAME не найден среди доступных этому входу.",
+    "storage_failed": "Не удалось сохранить токены (проверьте TOKEN_ENCRYPTION_KEY).",
+    "ok": "Подключено.",
+}
+
+
+class LoginFailure(OAuthError):
+    def __init__(self, reason: str, detail: str = "", report: dict | None = None):
+        self.reason, self.detail, self.report = reason, detail, report or {}
+        super().__init__(REASONS.get(reason, reason) + (f" {detail}" if detail else ""))
+
+
+def save_login_attempt(conn: sqlite3.Connection, report: dict) -> None:
+    """Обезличенный отчёт: без токенов, кодов OAuth, ID и имён. Хранятся 20 последних."""
+    import json
+    report.setdefault("at", datetime.now().isoformat(timespec="seconds"))
+    conn.execute("INSERT INTO login_attempts(ok, reason, report_json) VALUES (?,?,?)",
+                 (1 if report.get("reason") == "ok" else 0, report.get("reason"),
+                  json.dumps(report, ensure_ascii=False, default=str)))
+    conn.execute("DELETE FROM login_attempts WHERE id NOT IN (SELECT id FROM login_attempts ORDER BY id DESC LIMIT 20)")
+    conn.commit()
+
+
+def last_login_attempt(conn: sqlite3.Connection) -> dict | None:
+    import json
+    r = conn.execute("SELECT report_json FROM login_attempts ORDER BY id DESC LIMIT 1").fetchone()
+    return json.loads(r["report_json"]) if r else None
+
+
+def record_failure(conn: sqlite3.Connection, reason: str, stage: str, detail: str = "", /, **extra) -> LoginFailure:
+    from .discovery import anonymize
+    extra.pop("stage", None)
+    rep = {"reason": reason, "reason_text": REASONS.get(reason, reason), "stage": stage,
+           "detail": anonymize(detail) if detail else None, **extra}
+    save_login_attempt(conn, rep)
+    return LoginFailure(reason, anonymize(detail) or "", rep)
+
+
 def complete_login(conn: sqlite3.Connection, code: str, transport: httpx.BaseTransport | None = None) -> dict:
-    """Шаги 2–6. Возвращает сводку подключения (без токенов)."""
-    tok = exchange_code(code, transport=transport)
+    """Шаги 2–6. Возвращает сводку подключения (без токенов).
+    При любой неудаче сохраняет обезличенный отчёт и поднимает LoginFailure с понятной причиной."""
+    from .discovery import anonymize, discover, granular_summary
+
+    rep: dict = {"stage": "exchange", "graph_api_version": settings.graph_api_version}
+    try:
+        tok = exchange_code(code, transport=transport)
+    except GraphError as exc:
+        raise record_failure(conn, "exchange_failed", "exchange", str(exc), http_status=exc.status, error_code=exc.code)
     token = tok["access_token"]
 
     dbg = debug_token(token, transport=transport)
@@ -78,16 +137,17 @@ def complete_login(conn: sqlite3.Connection, code: str, transport: httpx.BaseTra
         # Без типа токена нельзя безопасно решить, нужен ли обмен на долгоживущий:
         # иначе сохранился бы короткий токен (1–2 часа). Токен не сохраняем.
         e = dbg.error or {}
-        raise OAuthError(f"Не удалось проверить токен (debug_token): HTTP {dbg.http_status}, code {e.get('code')}: "
-                         f"{e.get('message')}. Проверьте META_APP_SECRET.")
+        raise record_failure(conn, "debug_token_failed", "debug_token", e.get("message", ""),
+                             http_status=dbg.http_status, error_code=e.get("code"))
     info = (dbg.data or {}).get("data", {})
-    if not info.get("is_valid", False):
-        raise OAuthError("Meta вернула недействительный токен (debug_token: is_valid=false)")
     token_type = (info.get("type") or "UNKNOWN").upper()
-    if token_type not in {"USER", "SYSTEM_USER"}:
-        raise OAuthError(f"Неподдерживаемый тип токена: {token_type}. Ожидается USER или SYSTEM_USER "
-                         "(проверьте тип токена в конфигурации входа).")
     scopes = info.get("scopes") or []
+    rep.update({"token_type": token_type, "scopes": scopes, "granular_scopes": granular_summary(info),
+                "token_has_expiry": bool(info.get("expires_at")), "data_access_expiry": bool(info.get("data_access_expires_at"))})
+    if not info.get("is_valid", False):
+        raise record_failure(conn, "token_invalid", "debug_token", **rep)
+    if token_type not in {"USER", "SYSTEM_USER"}:
+        raise record_failure(conn, "unsupported_token_type", "debug_token", f"Получен тип: {token_type}.", **rep)
     exchanged = False
 
     expires_in = tok.get("expires_in")
@@ -97,57 +157,67 @@ def complete_login(conn: sqlite3.Connection, code: str, transport: httpx.BaseTra
             token, expires_in, exchanged = long["access_token"], long.get("expires_in"), True
             dbg2 = debug_token(token, transport=transport)
             if dbg2.ok:
-                info = dbg2.data.get("data", {})
+                info = dbg2.data.get("data", {}) or info
         except GraphError as exc:
-            raise OAuthError(f"Не удалось получить долгоживущий токен: {exc}") from exc
+            raise record_failure(conn, "long_lived_failed", "long_lived", str(exc), **rep)
+    rep["exchanged_long_lived"] = exchanged
 
     user_expires = _ts(info.get("expires_at")) or (datetime.now() + timedelta(seconds=int(expires_in)) if expires_in else None)
     login_provider = "meta_system_user" if token_type == "SYSTEM_USER" else "meta_user"
     items = [{"provider": login_provider, "subject": str(info.get("user_id") or "me"), "token": token,
               "scopes": ",".join(scopes), "expires_at": user_expires}]
 
+    rep["stage"] = "discovery"
     with GraphClient(token, transport=transport) as client:
-        candidates = []  # (ig_id, username, page_id, page_token)
-        pages_error = None
-        try:
-            for p in client.pages_with_instagram():
-                iga = p["instagram_business_account"]
-                candidates.append((iga["id"], (iga.get("username") or "").lower(), p["id"], p.get("access_token")))
-        except GraphError as exc:
-            pages_error = str(exc)
-        source = "me/accounts"
-        if not candidates:
-            source = "debug_token.granular_scopes"
-            for ig_id in ig_ids_from_debug({"data": info}):
-                try:
-                    u = client.ig_user(ig_id)
-                    candidates.append((ig_id, (u.get("username") or "").lower(), None, None))
-                except GraphError:
-                    candidates.append((ig_id, "", None, None))
-    if not candidates:
-        raise OAuthError("Не найден профессиональный Instagram-аккаунт, доступный этому входу. "
-                         "Проверьте, что Instagram привязан к Facebook-странице и выбран в окне входа Meta"
-                         + (f" (/me/accounts: {pages_error})" if pages_error else ""))
-    chosen = candidates[0]
-    if settings.meta_ig_username:
-        match = [c for c in candidates if c[1] == settings.meta_ig_username]
-        if not match:
-            raise OAuthError(f"Аккаунт @{settings.meta_ig_username} не найден среди доступных: "
-                             + ", ".join("@" + (c[1] or c[0]) for c in candidates))
-        chosen = match[0]
-    ig_id, ig_username, page_id, page_token = chosen
-    if page_id and page_token:
-        # Токен страницы, полученный из долгоживущего user token, не имеет фиксированного срока.
-        items.append({"provider": "meta_page", "subject": page_id, "token": page_token, "scopes": None, "expires_at": None})
+        found = discover(client, info)
+    rep["probes"] = found.public_probes()
+    rep["candidates"] = len(found.candidates)
+    rep["verified_candidates"] = sum(1 for c in found.candidates if c.verified)
+    rep["candidate_sources"] = sorted({c.source for c in found.candidates})
 
-    replace_tokens(conn, items)
-    for k, v in {"ig_user_id": ig_id, "ig_username": ig_username, "page_id": page_id or "",
-                 "token_type": token_type, "account_source": source, "auth_provider": login_provider,
+    if not found.candidates:
+        has_ig_scope = any(str(s).startswith("instagram") for s in scopes)
+        if scopes and not has_ig_scope:
+            raise record_failure(conn, "no_instagram_scopes", "discovery",
+                                 "Выданные разрешения: " + ", ".join(scopes) + ".", **rep)
+        raise record_failure(conn, "no_instagram_found", "discovery",
+                             "Проверьте, что в окне Meta выбран Instagram-аккаунт и что конфигурация входа "
+                             "включает instagram_basic. Подробности — в отчёте о попытке.", **rep)
+    verified = [c for c in found.candidates if c.verified]
+    if not verified:
+        failed = [p for p in found.probes if p.method.startswith("Проверка профиля")]
+        code_ = failed[0].error_code if failed else None
+        raise record_failure(conn, "profile_unreadable", "verify",
+                             f"Код ошибки Meta: {code_}." if code_ else "", **rep)
+    chosen = verified[0]
+    if settings.meta_ig_username:
+        match = [c for c in verified if c.username == settings.meta_ig_username]
+        if not match:
+            raise record_failure(conn, "username_mismatch", "select",
+                                 f"Доступно аккаунтов: {len(verified)}.", **rep)
+        chosen = match[0]
+    if chosen.page_id and chosen.page_token:
+        # Токен страницы, полученный из долгоживущего user token, не имеет фиксированного срока.
+        items.append({"provider": "meta_page", "subject": chosen.page_id, "token": chosen.page_token,
+                      "scopes": None, "expires_at": None})
+
+    try:
+        replace_tokens(conn, items)
+    except Exception as exc:  # noqa: BLE001 — сообщение без секретов
+        raise record_failure(conn, "storage_failed", "store", type(exc).__name__, **rep) from exc
+    page_used = bool(chosen.page_id and chosen.page_token)
+    for k, v in {"ig_user_id": chosen.ig_id, "ig_username": chosen.username, "page_id": chosen.page_id if page_used else "",
+                 "token_type": token_type, "account_source": chosen.source, "auth_provider": login_provider,
                  "connected_at": datetime.now().isoformat(timespec="seconds"), "reauth_required": ""}.items():
-        kv_set(conn, k, v)
-    return {"ig_user_id": ig_id, "ig_username": ig_username, "page_id": page_id, "token_type": token_type,
-            "exchanged_long_lived": exchanged, "account_source": source, "candidates": len(candidates),
-            "scopes": scopes, "missing_scopes": [s for s in REQUIRED_SCOPES if scopes and s not in scopes],
+        kv_set(conn, k, v or "")
+    rep.update({"reason": "ok", "reason_text": REASONS["ok"], "stage": "done", "account_source": chosen.source,
+                "page_token_used": page_used})
+    save_login_attempt(conn, rep)
+    return {"ig_user_id": chosen.ig_id, "ig_username": chosen.username, "page_id": chosen.page_id if page_used else None,
+            "token_type": token_type, "exchanged_long_lived": exchanged, "account_source": chosen.source,
+            "candidates": len(found.candidates), "scopes": scopes,
+            "missing_scopes": [s for s in REQUIRED_SCOPES if scopes and s not in scopes
+                               and not (token_type == "SYSTEM_USER" and s.startswith("pages_"))],
             "unneeded_scopes": [s for s in scopes if s in UNNEEDED_SCOPES]}
 
 

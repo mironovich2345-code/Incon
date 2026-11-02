@@ -39,6 +39,8 @@
       решить вопрос с `business_management`
 - [x] Production-развёртывание на Railway подготовлено → [06](06-railway-deploy.md)
 - [ ] **Вы:** настроить сервис Railway (Volume `/data`, Healthcheck `/healthz`, Variables) и выполнить деплой
+- [x] Исправлен поиск Instagram-аккаунта при Unified Login, обезличенные отчёты о попытках входа → [07](07-connection-fix-and-checks.md)
+- [ ] **Вы:** повторить вход на Railway, прислать `/meta/login-attempts.json`; проверить вариант Instagram Login в кабинете
 - [ ] Ежедневная синхронизация (cron / systemd timer) и дневные insights аккаунта в БД
 
 ## Этап 3 — усиление анализа

@@ -69,3 +69,4 @@ python -m pytest -q
 4. [Настройка существующего Meta-приложения и Redirect URI](docs/04-meta-app-setup.md)
 5. [Технический аудит, совместимость, запросы после подключения](docs/05-audit-and-connection.md)
 6. [Production-развёртывание на Railway, переменные, App ID / App Secret](docs/06-railway-deploy.md)
+7. [Исправление поиска Instagram-аккаунта, повторная проверка, проверка Instagram Login](docs/07-connection-fix-and-checks.md)

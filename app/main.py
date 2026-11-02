@@ -537,7 +537,8 @@ def _secure_cookie() -> bool:
 @app.get("/connect", response_class=HTMLResponse, dependencies=D)
 def connect_page(request: Request):
     from .meta.diagnostics import last_report
-    return render(request, "connect.html", tokens=token_status(conn), problems=settings.meta_config_problems(),
+    from .meta.oauth import last_login_attempt
+    return render(request, "connect.html", attempt=last_login_attempt(conn), tokens=token_status(conn), problems=settings.meta_config_problems(),
                   kv={k: kv_get(conn, k) for k in ("ig_user_id", "ig_username", "page_id", "token_type", "account_source",
                                                   "connected_at", "last_sync", "reauth_required")},
                   report=last_report(conn))
@@ -568,7 +569,7 @@ def meta_login():
 def meta_callback(request: Request, code: str = "", state: str = "", error: str = "", error_reason: str = "",
                   error_description: str = ""):
     from .meta.client import GraphError
-    from .meta.oauth import STATE_COOKIE, OAuthError, check_state, complete_login
+    from .meta.oauth import STATE_COOKIE, LoginFailure, OAuthError, check_state, complete_login, record_failure
 
     def done(resp: RedirectResponse) -> RedirectResponse:
         resp.delete_cookie(STATE_COOKIE, path="/meta")
@@ -577,14 +578,20 @@ def meta_callback(request: Request, code: str = "", state: str = "", error: str 
     try:
         check_state(conn, state, request.cookies.get(STATE_COOKIE))
     except OAuthError as exc:
+        record_failure(conn, "state_invalid", "state", str(exc))
         return done(back("/connect", err=str(exc)))
     if error:
-        reason = "вы отменили вход или не выдали разрешения" if error_reason == "user_denied" else (error_description or error)
-        return done(back("/connect", err=f"Meta: {reason}"))
+        if error_reason == "user_denied":
+            f = record_failure(conn, "user_denied", "dialog")
+        else:
+            f = record_failure(conn, "meta_error", "dialog", f"{error}: {error_description}")
+        return done(back("/connect", err=str(f)))
     if not code:
-        return done(back("/connect", err="Meta не вернула code"))
+        return done(back("/connect", err=str(record_failure(conn, "no_code", "dialog"))))
     try:
         res = complete_login(conn, code)
+    except LoginFailure as exc:
+        return done(back("/connect", err=f"Подключение не выполнено: {exc}"))
     except (OAuthError, GraphError, TokenStoreError) as exc:
         return done(back("/connect", err=f"Ошибка подключения: {exc}"))
     msg = f"Подключено: @{res['ig_username'] or res['ig_user_id']} (токен {res['token_type']}, аккаунт найден через {res['account_source']})"
@@ -594,6 +601,15 @@ def meta_callback(request: Request, code: str = "", state: str = "", error: str 
     if res["unneeded_scopes"]:
         warn.append("выданы лишние разрешения (уберите из конфигурации): " + ", ".join(res["unneeded_scopes"]))
     return done(back("/connect", msg, "; ".join(warn) or None))
+
+
+@app.get("/meta/login-attempts.json", dependencies=D)
+def meta_login_attempts_json():
+    """Обезличенные отчёты о последних попытках входа (без токенов, кодов, ID и имён)."""
+    from fastapi.responses import JSONResponse
+    out = [json.loads(r["report_json"]) for r in
+           conn.execute("SELECT report_json FROM login_attempts ORDER BY id DESC LIMIT 20").fetchall()]
+    return JSONResponse(out)
 
 
 def _graph_failure(exc) -> RedirectResponse:
