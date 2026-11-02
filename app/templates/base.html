@@ -25,6 +25,7 @@
   </nav>
 </header>
 <main>
+  {% for p in deploy_problems or [] %}<div class="flash err">{{ p }}</div>{% endfor %}
   {% if reauth %}<div class="flash err">Нужен повторный вход через Meta: {{ reauth }} — <a href="/connect">перейти</a></div>{% endif %}
   {% if flash %}<div class="flash ok">{{ flash }}</div>{% endif %}
   {% if error %}<div class="flash err">{{ error }}</div>{% endif %}

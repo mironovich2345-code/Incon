@@ -25,10 +25,10 @@ APP_SECRET = "appsecretVALUE999"
 @pytest.fixture()
 def meta_env(monkeypatch):
     key = security.generate_key()
-    for k, v in {"meta_app_id": "123", "meta_app_secret": APP_SECRET, "meta_login_config_id": "cfg42",
+    for k, v in {"meta_app_id": "123", "meta_app_secret": APP_SECRET, "meta_login_config_id": "1313415880861047",
                  "token_encryption_key": key, "token_encryption_keys_old": [], "app_password": "pw",
-                 "meta_redirect_uri": "https://localhost:8000/meta/callback", "meta_ig_username": "",
-                 "meta_api_enabled": True}.items():
+                 "meta_redirect_uri": "https://incon-production.up.railway.app/meta/callback", "meta_ig_username": "",
+                 "meta_api_enabled": True, "railway_environment": "", "railway_public_domain": "", "railway_volume_mount_path": "", "allow_no_password": False}.items():
         monkeypatch.setattr(settings, k, v)
     return key
 
@@ -87,8 +87,8 @@ def test_dialog_url_uses_config_id_not_scope(meta_env):
     url = mc.oauth_dialog_url("STATE")
     q = dict(httpx.URL(url).params)
     assert url.startswith("https://www.facebook.com/")
-    assert q["config_id"] == "cfg42" and q["response_type"] == "code" and q["override_default_response_type"] == "true"
-    assert "scope" not in q and q["redirect_uri"] == "https://localhost:8000/meta/callback"
+    assert q["config_id"] == "1313415880861047" and q["response_type"] == "code" and q["override_default_response_type"] == "true"
+    assert "scope" not in q and q["redirect_uri"] == "https://incon-production.up.railway.app/meta/callback"
     assert APP_SECRET not in url
 
 
@@ -362,7 +362,7 @@ def web(meta_env, monkeypatch, tmp_path):
     c = connect(tmp_path / "w.sqlite3")
     init_db(c)
     monkeypatch.setattr(main, "conn", c)
-    client = TestClient(main.app, base_url="https://localhost:8000")
+    client = TestClient(main.app, base_url="https://incon-production.up.railway.app")
     client.auth = ("u", "pw")
     return client, c, main
 
@@ -375,7 +375,7 @@ def test_web_requires_password(web):
 def test_web_login_sets_state_cookie_and_redirects(web):
     client, c, _ = web
     r = client.get("/meta/login", follow_redirects=False)
-    assert r.status_code == 303 and "config_id=cfg42" in r.headers["location"]
+    assert r.status_code == 303 and "config_id=1313415880861047" in r.headers["location"]
     cookie = r.headers["set-cookie"]
     assert "HttpOnly" in cookie and "Secure" in cookie and "samesite=lax" in cookie.lower()
 

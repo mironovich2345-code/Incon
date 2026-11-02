@@ -29,9 +29,13 @@
 - Пароль от Instagram не запрашивается; токены хранятся зашифрованными на сервере.
 - Отсутствующая метрика = «—», а не 0 и не оценка. Рядом с медианами указан размер выборки.
 
-## Запуск
+## Production (Railway)
+Dockerfile + `python -m app.serve`, Healthcheck `/healthz`, Volume `/data`.
+Подробно: [docs/06-railway-deploy.md](docs/06-railway-deploy.md).
+
+## Локальный запуск
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 ```bash
 cp .env.example .env
@@ -40,7 +44,7 @@ cp .env.example .env
 ```bash
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
-С Instagram API — по HTTPS, адрес совпадает с Redirect URI `https://localhost:8000/meta/callback`:
+С Instagram API локально — по HTTPS (только если `https://localhost:8000/meta/callback` добавлен в Meta):
 ```bash
 python -m app.cli dev-cert
 ```
@@ -64,3 +68,4 @@ python -m pytest -q
 3. [Пошаговый план](docs/03-implementation-plan.md)
 4. [Настройка существующего Meta-приложения и Redirect URI](docs/04-meta-app-setup.md)
 5. [Технический аудит, совместимость, запросы после подключения](docs/05-audit-and-connection.md)
+6. [Production-развёртывание на Railway, переменные, App ID / App Secret](docs/06-railway-deploy.md)

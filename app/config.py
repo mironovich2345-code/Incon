@@ -30,9 +30,22 @@ def _bool(name: str, default: bool = False) -> bool:
     return os.environ.get(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _default_data_dir() -> Path:
+    # DATA_DIR > том Railway (RAILWAY_VOLUME_MOUNT_PATH задаётся Railway автоматически) > ./data
+    return Path(os.environ.get("DATA_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or BASE_DIR / "data")
+
+
+def _default_redirect_uri() -> str:
+    explicit = os.environ.get("META_REDIRECT_URI")
+    if explicit:
+        return explicit.strip()
+    domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
+    return f"https://{domain}/meta/callback" if domain else "https://localhost:8000/meta/callback"
+
+
 @dataclass
 class Settings:
-    data_dir: Path = field(default_factory=lambda: Path(os.environ.get("DATA_DIR", BASE_DIR / "data")))
+    data_dir: Path = field(default_factory=_default_data_dir)
     app_password: str = field(default_factory=lambda: os.environ.get("APP_PASSWORD", ""))
 
     # Шифрование токенов (Fernet key, 32 байта base64). Обязателен для API-режима.
@@ -45,19 +58,22 @@ class Settings:
     # Meta / Instagram (Facebook Login for Business). По умолчанию API выключен:
     # MVP работает на ручном импорте данных.
     meta_api_enabled: bool = field(default_factory=lambda: _bool("META_API_ENABLED"))
-    meta_app_id: str = field(default_factory=lambda: os.environ.get("META_APP_ID", ""))
-    meta_app_secret: str = field(default_factory=lambda: os.environ.get("META_APP_SECRET", ""))
-    meta_login_config_id: str = field(default_factory=lambda: os.environ.get("META_LOGIN_CONFIG_ID", ""))
+    meta_app_id: str = field(default_factory=lambda: os.environ.get("META_APP_ID", "").strip())
+    meta_app_secret: str = field(default_factory=lambda: os.environ.get("META_APP_SECRET", "").strip())
+    meta_login_config_id: str = field(default_factory=lambda: os.environ.get("META_LOGIN_CONFIG_ID", "").strip())
     # Должен ТОЧНО совпадать с адресом в «Valid OAuth Redirect URIs» приложения Meta.
-    meta_redirect_uri: str = field(
-        default_factory=lambda: os.environ.get("META_REDIRECT_URI", "https://localhost:8000/meta/callback")
-    )
+    meta_redirect_uri: str = field(default_factory=_default_redirect_uri)
     # Если к пользователю привязано несколько Instagram-аккаунтов — какой подключать.
     meta_ig_username: str = field(default_factory=lambda: os.environ.get("META_IG_USERNAME", "").lstrip("@").lower())
     # Разрешить работу без APP_PASSWORD (только если интерфейс доступен исключительно с localhost).
     allow_no_password: bool = field(default_factory=lambda: _bool("ALLOW_NO_PASSWORD"))
     # Проверьте актуальную версию в Graph API changelog перед подключением.
     graph_api_version: str = field(default_factory=lambda: os.environ.get("GRAPH_API_VERSION", "v24.0"))
+
+    # Окружение Railway (переменные задаются Railway автоматически).
+    railway_environment: str = field(default_factory=lambda: os.environ.get("RAILWAY_ENVIRONMENT", ""))
+    railway_public_domain: str = field(default_factory=lambda: os.environ.get("RAILWAY_PUBLIC_DOMAIN", ""))
+    railway_volume_mount_path: str = field(default_factory=lambda: os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", ""))
 
     # Публикация намеренно отключена. Флага для включения нет — это отдельный этап.
     publishing_enabled: bool = False
@@ -82,6 +98,38 @@ class Settings:
         return self.data_dir / "drafts"
 
     @property
+    def is_hosted(self) -> bool:
+        """Публично доступное развёртывание (Railway): пароль обязателен, ALLOW_NO_PASSWORD игнорируется."""
+        return bool(self.railway_environment)
+
+    @property
+    def password_required(self) -> bool:
+        return self.is_hosted or not self.allow_no_password
+
+    @property
+    def storage_persistent(self) -> bool | None:
+        """На Railway данные должны лежать на томе, иначе пропадут при каждом деплое."""
+        if not self.is_hosted:
+            return None
+        vol = self.railway_volume_mount_path
+        if not vol:
+            return False
+        try:
+            self.data_dir.resolve().relative_to(Path(vol).resolve())
+            return True
+        except ValueError:
+            return False
+
+    def deployment_problems(self) -> list[str]:
+        p = []
+        if self.is_hosted and not self.app_password:
+            p.append("APP_PASSWORD не задан — интерфейс закрыт до установки пароля")
+        if self.storage_persistent is False:
+            p.append("Данные не на постоянном томе Railway: подключите Volume (Mount Path /data) — "
+                     "иначе база и загруженные файлы удаляются при каждом деплое")
+        return p
+
+    @property
     def meta_configured(self) -> bool:
         return not self.meta_config_problems()
 
@@ -104,9 +152,19 @@ class Settings:
             p.append("Путь META_REDIRECT_URI должен быть /meta/callback")
         if u.query or u.fragment:
             p.append("META_REDIRECT_URI не должен содержать ? или #")
-        if not self.app_password and not self.allow_no_password:
-            p.append("APP_PASSWORD не задан: интерфейс с токенами нельзя оставлять без пароля "
-                     "(или ALLOW_NO_PASSWORD=true, если сервер слушает только 127.0.0.1)")
+        if u.netloc.split(":")[0] in {"0.0.0.0", "127.0.0.1"}:
+            p.append("META_REDIRECT_URI должен указывать на домен, зарегистрированный в Meta")
+        if self.railway_public_domain and u.netloc != self.railway_public_domain:
+            p.append(f"Хост META_REDIRECT_URI ({u.netloc}) не совпадает с доменом сервиса Railway "
+                     f"({self.railway_public_domain})")
+        if self.meta_app_id and not self.meta_app_id.isdigit():
+            p.append("META_APP_ID должен состоять только из цифр")
+        if self.meta_login_config_id and not self.meta_login_config_id.isdigit():
+            p.append("META_LOGIN_CONFIG_ID должен состоять только из цифр")
+        if not self.app_password and self.password_required:
+            p.append("APP_PASSWORD не задан: интерфейс с токенами нельзя оставлять без пароля"
+                     + ("" if self.is_hosted else " (или ALLOW_NO_PASSWORD=true, если сервер слушает только 127.0.0.1)"))
+        p.extend(x for x in self.deployment_problems() if not x.startswith("APP_PASSWORD"))
         return p
 
 

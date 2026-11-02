@@ -12,23 +12,26 @@
   а запрос с параметром `scope` они отклоняют с ошибкой «Invalid Scopes»).
 
 ## Redirect URI
-Зарегистрируйте **ровно эту строку** (без слэша в конце, без параметров):
+Зарегистрирован (production, Railway):
 
 ```
-https://localhost:8000/meta/callback
+https://incon-production.up.railway.app/meta/callback
 ```
 
-Она совпадает со значением по умолчанию `META_REDIRECT_URI` и используется при запуске приложения
-на вашем компьютере по HTTPS (см. «Запуск» ниже). Если позже приложение будет развёрнуто на сервере,
-добавьте второй URI вида `https://<домен сервера>/meta/callback` и пропишите его в `META_REDIRECT_URI`.
-Сайт mironovich.pro для этого менять не нужно — можно использовать отдельный поддомен или другой хост.
+`META_REDIRECT_URI` на Railway должен совпадать с ним посимвольно (без слэша в конце, без параметров).
+Приложение проверяет это при запуске и показывает расхождение на странице «API».
+Локальный вариант `https://localhost:8000/meta/callback` нужен, только если вы запускаете
+приложение на своём компьютере и добавили этот URI в Meta.
+
+Развёртывание и переменные — [06-railway-deploy.md](06-railway-deploy.md);
+где взять App ID и App Secret — раздел 6.4 там же.
 
 ## Шаги в Meta Developers
 
 ### 1. Настройки входа
 App Dashboard → Use cases → «Управление сообщениями и контентом в Instagram» → Customize →
 настройка через Facebook Login (Facebook Login for Business) → Settings:
-- **Valid OAuth Redirect URIs:** `https://localhost:8000/meta/callback`
+- **Valid OAuth Redirect URIs:** `https://incon-production.up.railway.app/meta/callback`
 - **Client OAuth login:** включено; **Web OAuth login:** включено
 - **Enforce HTTPS:** включено; **Use Strict Mode for redirect URIs:** включено (URI должен совпадать посимвольно)
 - Если в кабинете есть «Login with the JavaScript SDK» — не нужен, оставьте выключенным.
@@ -73,7 +76,7 @@ App Dashboard → Facebook Login for Business → **Configurations** → отк�
 
 ### 5. Ключи
 App Settings → Basic: **App ID** → `META_APP_ID`, **App Secret** → `META_APP_SECRET`.
-Секреты вписываются только в файл `.env` на компьютере/сервере. Файл `.env` исключён из Git.
+
 
 ### 6. Instagram и страница
 - Instagram-аккаунт — профессиональный (Business или Creator).

@@ -33,10 +33,12 @@
 - [x] Диагностика: `POST /meta/diagnostics`, `GET /meta/diagnostics.json`, `GET /meta/health`
 - [x] CSV переведён в резервный режим (не перезаписывает данные API)
 - [ ] **Вы:** настроить существующее приложение по [04-meta-app-setup.md](04-meta-app-setup.md)
-      и зарегистрировать Redirect URI `https://localhost:8000/meta/callback`
+      и зарегистрировать Redirect URI (сделано: `https://incon-production.up.railway.app/meta/callback`)
 - [ ] **Вы:** заполнить `.env`, запустить по HTTPS, «Войти через Meta», «Запустить диагностику»
 - [ ] По результатам диагностики: скорректировать каталог метрик, статусы конкурентов,
       решить вопрос с `business_management`
+- [x] Production-развёртывание на Railway подготовлено → [06](06-railway-deploy.md)
+- [ ] **Вы:** настроить сервис Railway (Volume `/data`, Healthcheck `/healthz`, Variables) и выполнить деплой
 - [ ] Ежедневная синхронизация (cron / systemd timer) и дневные insights аккаунта в БД
 
 ## Этап 3 — усиление анализа

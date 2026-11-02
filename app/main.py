@@ -23,7 +23,11 @@ from .db import connect, get_or_create_account, init_db, kv_get, kv_set, normali
 from .metrics import CATALOG, SCOPE_LABELS, STATUS_LABELS, by_scope
 from .security import TokenStoreError, delete_tokens, token_status
 
-app = FastAPI(title="Instagram Content Intelligence", docs_url=None, redoc_url=None)
+from . import logsafe
+
+logsafe.install()
+
+app = FastAPI(title="Instagram Content Intelligence", docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "app" / "templates")
 _basic = HTTPBasic(auto_error=False)
@@ -43,19 +47,81 @@ def _num(v, digits: int = 0, suffix: str = ""):
 
 templates.env.filters["num"] = _num
 templates.env.filters["fromjson"] = lambda s: json.loads(s) if s else []
+class _PublicSettings:
+    """Только несекретные настройки — шаблоны не получают доступа к секретам."""
+    meta_api_enabled = property(lambda self: settings.meta_api_enabled)
+    graph_api_version = property(lambda self: settings.graph_api_version)
+    meta_redirect_uri = property(lambda self: settings.meta_redirect_uri)
+    outlier_ratio = property(lambda self: settings.outlier_ratio)
+
+
 templates.env.globals.update(
     TOPICS=classify.TOPIC_LIST, FORMATS=classify.FORMAT_LIST, HOOKS=classify.HOOK_LIST,
-    DRAFT_STATUS=publishing.STATUS_LABELS, settings=settings,
+    DRAFT_STATUS=publishing.STATUS_LABELS, settings=_PublicSettings(),
 )
 
+# ---------------- Авторизация интерфейса ----------------
+AUTH_MAX_FAILURES = 10
+AUTH_WINDOW_SEC = 15 * 60
+_auth_failures: dict[str, list[float]] = {}
 
-def auth(credentials: HTTPBasicCredentials | None = Depends(_basic)) -> None:
-    """Если задан APP_PASSWORD — интерфейс закрыт Basic-авторизацией."""
+
+def _client_ip(request: Request) -> str:
+    # За прокси Railway uvicorn (proxy_headers) подставляет реальный адрес из X-Forwarded-For.
+    return request.client.host if request.client else "unknown"
+
+
+def auth(request: Request, credentials: HTTPBasicCredentials | None = Depends(_basic)) -> None:
+    """HTTP Basic. На Railway без APP_PASSWORD интерфейс закрыт полностью.
+    После 10 неудачных попыток с одного IP за 15 минут — 429."""
     if not settings.app_password:
+        if settings.password_required and settings.is_hosted:
+            raise HTTPException(status_code=503, detail="APP_PASSWORD не задан: интерфейс закрыт")
+        if settings.password_required and settings.meta_api_enabled:
+            raise HTTPException(status_code=503, detail="Задайте APP_PASSWORD (или ALLOW_NO_PASSWORD=true локально)")
         return
+    ip = _client_ip(request)
+    now = time.time()
+    recent = [t for t in _auth_failures.get(ip, []) if now - t < AUTH_WINDOW_SEC]
+    if len(recent) >= AUTH_MAX_FAILURES:
+        _auth_failures[ip] = recent
+        raise HTTPException(status_code=429, detail="Слишком много неудачных попыток входа. Повторите позже.",
+                            headers={"Retry-After": str(AUTH_WINDOW_SEC)})
     ok = credentials is not None and secrets.compare_digest(credentials.password.encode(), settings.app_password.encode())
     if not ok:
-        raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Basic"})
+        if credentials is not None:
+            recent.append(now)
+        _auth_failures[ip] = recent
+        raise HTTPException(status_code=401, headers={"WWW-Authenticate": 'Basic realm="Content Intelligence", charset="UTF-8"'})
+    _auth_failures.pop(ip, None)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    h = resp.headers
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("X-Frame-Options", "DENY")
+    # no-referrer: адрес /meta/callback?code=… не уходит третьим сайтам
+    h.setdefault("Referrer-Policy", "no-referrer")
+    h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if not request.url.path.startswith("/static"):
+        h.setdefault("Cache-Control", "no-store")
+    if request.url.scheme == "https":
+        h.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return resp
+
+
+@app.get("/healthz", include_in_schema=False)
+def healthz():
+    """Healthcheck для Railway: без авторизации и без сведений о конфигурации."""
+    from fastapi.responses import JSONResponse
+    try:
+        conn.execute("SELECT 1").fetchone()
+        db_ok = True
+    except Exception:  # noqa: BLE001
+        db_ok = False
+    return JSONResponse({"status": "ok" if db_ok else "error"}, status_code=200 if db_ok else 503)
 
 
 def render(request: Request, name: str, **ctx) -> HTMLResponse:
@@ -63,6 +129,7 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx.setdefault("error", request.query_params.get("err"))
     ctx["own"] = own_account(conn)
     ctx["reauth"] = kv_get(conn, "reauth_required") if settings.meta_api_enabled else None
+    ctx["deploy_problems"] = settings.deployment_problems()
     return templates.TemplateResponse(request, name, ctx)
 
 
@@ -593,6 +660,19 @@ def meta_health():
         return JSONResponse(token_health(conn))
     except TokenStoreError as exc:
         return JSONResponse({"status": "error", "error": str(exc)}, status_code=500)
+
+
+@app.post("/meta/app-check", dependencies=D)
+def meta_app_check():
+    """Проверка пары META_APP_ID / META_APP_SECRET до входа (app access token → GET /{app-id})."""
+    from .meta.client import check_app_credentials
+    if not (settings.meta_app_id and settings.meta_app_secret):
+        return back("/connect", err="Задайте META_APP_ID и META_APP_SECRET")
+    r = check_app_credentials()
+    kv_set(conn, "app_check", json.dumps(r, ensure_ascii=False))
+    if r["ok"]:
+        return back("/connect", f"App ID и App Secret верны: приложение «{r.get('name')}» (id {r.get('id')})")
+    return back("/connect", err=f"Проверка App ID/App Secret не прошла: HTTP {r.get('http_status')}, {r.get('error')}")
 
 
 @app.post("/meta/disconnect", dependencies=D)

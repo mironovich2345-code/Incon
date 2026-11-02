@@ -35,7 +35,7 @@ def _step(name: str, r: CallResult | None, ok: bool | None = None, summary: str 
 def run(conn: sqlite3.Connection, transport: httpx.BaseTransport | None = None, competitors_limit: int = 5) -> dict:
     steps: list[dict] = []
     report = {"started_at": datetime.now().isoformat(timespec="seconds"), "graph_api_version": settings.graph_api_version,
-              "steps": steps}
+              "token_type": kv_get(conn, "token_type") or None, "steps": steps}
 
     problems = settings.meta_config_problems()
     steps.append({"step": "Конфигурация сервера", "ok": not problems, "summary": "; ".join(problems) or "ok",
@@ -128,8 +128,30 @@ def run(conn: sqlite3.Connection, transport: httpx.BaseTransport | None = None, 
     return _finish(conn, report)
 
 
+CAPABILITY_STEPS = {
+    "me_accounts": lambda n: n.startswith("Страницы с Instagram"),
+    "profile": lambda n: n == "Профиль Instagram",
+    "media": lambda n: n.startswith("Список публикаций"),
+    "reel_insights": lambda n: n.startswith("Insights Reels:"),
+    "account_insights": lambda n: n.startswith("Insights аккаунта:"),
+    "business_discovery_self": lambda n: n.startswith("Business Discovery: свой"),
+    "business_discovery_competitors": lambda n: n.startswith("Business Discovery: @"),
+}
+
+
+def capabilities(steps: list[dict]) -> dict:
+    """Какие методы реально работают с текущим токеном (USER и SYSTEM_USER могут отличаться).
+    Значение: True/False — все/ни один запрос группы успешен, "partial" — часть, None — не проверялось."""
+    out = {}
+    for cap, match in CAPABILITY_STEPS.items():
+        res = [s.get("ok") for s in steps if match(s.get("step", "")) and s.get("http_status") is not None]
+        out[cap] = None if not res else (True if all(res) else (False if not any(res) else "partial"))
+    return out
+
+
 def _finish(conn: sqlite3.Connection, report: dict) -> dict:
     report["finished_at"] = datetime.now().isoformat(timespec="seconds")
+    report["capabilities"] = capabilities(report["steps"])
     report["ok"] = all(s.get("ok") is not False for s in report["steps"])
     # Обновить каталог доступности метрик по результатам реальных запросов
     for s in report["steps"]:

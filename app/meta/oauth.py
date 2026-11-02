@@ -74,10 +74,19 @@ def complete_login(conn: sqlite3.Connection, code: str, transport: httpx.BaseTra
     token = tok["access_token"]
 
     dbg = debug_token(token, transport=transport)
-    info = (dbg.data or {}).get("data", {}) if dbg.ok else {}
-    if dbg.ok and not info.get("is_valid", False):
+    if not dbg.ok:
+        # Без типа токена нельзя безопасно решить, нужен ли обмен на долгоживущий:
+        # иначе сохранился бы короткий токен (1–2 часа). Токен не сохраняем.
+        e = dbg.error or {}
+        raise OAuthError(f"Не удалось проверить токен (debug_token): HTTP {dbg.http_status}, code {e.get('code')}: "
+                         f"{e.get('message')}. Проверьте META_APP_SECRET.")
+    info = (dbg.data or {}).get("data", {})
+    if not info.get("is_valid", False):
         raise OAuthError("Meta вернула недействительный токен (debug_token: is_valid=false)")
-    token_type = info.get("type") or "UNKNOWN"
+    token_type = (info.get("type") or "UNKNOWN").upper()
+    if token_type not in {"USER", "SYSTEM_USER"}:
+        raise OAuthError(f"Неподдерживаемый тип токена: {token_type}. Ожидается USER или SYSTEM_USER "
+                         "(проверьте тип токена в конфигурации входа).")
     scopes = info.get("scopes") or []
     exchanged = False
 

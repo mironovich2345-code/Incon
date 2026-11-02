@@ -325,3 +325,22 @@ def ig_ids_from_debug(data: dict) -> list[str]:
         if g.get("scope") in {"instagram_basic", "instagram_manage_insights"} and g.get("target_ids"):
             return [str(t) for t in g["target_ids"]]
     return []
+
+
+def check_app_credentials(transport: httpx.BaseTransport | None = None) -> dict:
+    """Проверяет, что META_APP_ID и META_APP_SECRET образуют действительную пару.
+
+    GET /{app-id}?fields=id,name с app access token «app_id|app_secret». Неверный секрет
+    даёт ошибку OAuth; ответ с тем же id подтверждает App ID. Токены в результат не попадают.
+    """
+    app_token = f"{settings.meta_app_id}|{settings.meta_app_secret}"
+    c = GraphClient(app_token, transport=transport, app_secret="")
+    try:
+        r = c.call(f"/{settings.meta_app_id}", fields="id,name")
+    finally:
+        c.close()
+    if r.ok and str((r.data or {}).get("id")) == settings.meta_app_id:
+        return {"ok": True, "id": r.data["id"], "name": r.data.get("name"), "http_status": r.http_status}
+    err = (r.error or {}).get("message") or "ответ не содержит ожидаемый id"
+    return {"ok": False, "http_status": r.http_status, "code": (r.error or {}).get("code"),
+            "error": scrub(err, settings.meta_app_secret, app_token)}

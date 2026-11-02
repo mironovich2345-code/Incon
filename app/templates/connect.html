@@ -5,6 +5,8 @@
   <h2>Настройка</h2>
   <p>Режим: <b>{{ 'API включён' if settings.meta_api_enabled else 'API выключен (работает резервный CSV-импорт)' }}</b> · Graph API {{ settings.graph_api_version }}</p>
   <p>Redirect URI, который должен быть зарегистрирован в Meta <i>точно в таком виде</i>:<br><code class="big">{{ settings.meta_redirect_uri }}</code></p>
+  <form method="post" action="/meta/app-check" class="row inline"><button>Проверить App ID и App Secret</button>
+    <small class="muted">запрос к Meta с ключом приложения; вход не требуется</small></form>
   {% if problems %}<div class="flash warn"><b>Не готово к входу:</b><ul>{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul></div>
   {% else %}<p class="ok-text">Конфигурация сервера готова.</p>{% endif %}
   <p class="muted">Вход: Facebook Login for Business (конфигурация Unified Login, параметр config_id). Пароль вводится только на сайте Meta. Права на публикацию, сообщения и рекламу не нужны.</p>
@@ -32,6 +34,8 @@
 <section class="card" id="diagnostics">
   <h2>Диагностика {% if report %}<small>{{ report.started_at }} · {{ 'без ошибок' if report.ok else 'есть проблемы' }} · <a href="/meta/diagnostics.json" target="_blank">JSON</a></small>{% endif %}</h2>
   {% if report %}
+  <p>Тип токена: <b>{{ report.token_type or '—' }}</b>. Возможности токена:
+  {% for k, v in (report.capabilities or {}).items() %}<span class="tag {{ 'ok' if v == true else ('not_checked' if v is none or v == 'partial' else 'error') }}">{{ k }}: {{ 'да' if v == true else ('частично' if v == 'partial' else ('не проверено' if v is none else 'нет')) }}</span> {% endfor %}</p>
   <div class="scroll"><table class="dense">
     <thead><tr><th>Шаг</th><th>Результат</th><th>HTTP</th><th>Запрос (без токена)</th><th>Итог</th><th>Ошибка Meta</th><th>мс</th></tr></thead>
     <tbody>
