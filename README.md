@@ -70,3 +70,4 @@ python -m pytest -q
 5. [Технический аудит, совместимость, запросы после подключения](docs/05-audit-and-connection.md)
 6. [Production-развёртывание на Railway, переменные, App ID / App Secret](docs/06-railway-deploy.md)
 7. [Исправление поиска Instagram-аккаунта, повторная проверка, проверка Instagram Login](docs/07-connection-fix-and-checks.md)
+8. [Instagram Account ID для SYSTEM_USER: заключение и решение](docs/08-system-user-discovery.md)

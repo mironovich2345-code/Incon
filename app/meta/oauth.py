@@ -81,6 +81,9 @@ REASONS = {
     "long_lived_failed": "Не удалось получить долгоживущий токен.",
     "no_instagram_scopes": "В токене нет ни одного Instagram-разрешения: конфигурация входа не выдаёт доступ к Instagram.",
     "no_instagram_found": "Вход выполнен, но ни один способ не вернул Instagram-аккаунт.",
+    "business_management_missing": ("Вход выполнен токеном системного пользователя (SYSTEM_USER), но в нём нет "
+                                    "разрешения business_management, и ни один задокументированный способ не вернул "
+                                    "Instagram-аккаунт: endpoints бизнес-портфолио отвечают «Missing Permission»."),
     "profile_unreadable": "Instagram-аккаунт найден, но его профиль не читается с выданным токеном.",
     "username_mismatch": "Аккаунт из META_IG_USERNAME не найден среди доступных этому входу.",
     "storage_failed": "Не удалось сохранить токены (проверьте TOKEN_ENCRYPTION_KEY).",
@@ -169,7 +172,7 @@ def complete_login(conn: sqlite3.Connection, code: str, transport: httpx.BaseTra
 
     rep["stage"] = "discovery"
     with GraphClient(token, transport=transport) as client:
-        found = discover(client, info)
+        found = discover(client, info, token_type=token_type)
     rep["probes"] = found.public_probes()
     rep["candidates"] = len(found.candidates)
     rep["verified_candidates"] = sum(1 for c in found.candidates if c.verified)
@@ -180,6 +183,14 @@ def complete_login(conn: sqlite3.Connection, code: str, transport: httpx.BaseTra
         if scopes and not has_ig_scope:
             raise record_failure(conn, "no_instagram_scopes", "discovery",
                                  "Выданные разрешения: " + ", ".join(scopes) + ".", **rep)
+        from .discovery import is_missing_permission
+        blocked = sorted({p.endpoint for p in found.probes if is_missing_permission(p)})
+        rep["missing_permission_endpoints"] = blocked
+        if token_type == "SYSTEM_USER" and "business_management" not in scopes:
+            raise record_failure(conn, "business_management_missing", "discovery",
+                                 "Требуется добавить business_management в существующую конфигурацию входа "
+                                 "(тот же config_id) и войти заново." + (" Отклонены: " + ", ".join(blocked) + "." if blocked else ""),
+                                 **rep)
         raise record_failure(conn, "no_instagram_found", "discovery",
                              "Проверьте, что в окне Meta выбран Instagram-аккаунт и что конфигурация входа "
                              "включает instagram_basic. Подробности — в отчёте о попытке.", **rep)

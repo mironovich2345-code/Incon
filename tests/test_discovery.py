@@ -29,10 +29,16 @@ def meta(monkeypatch):
     return key
 
 
+SU_ID = "400000000000004"
+MISSING = "(#100) Missing Permission"
+
+
 def make_router(token_type="SYSTEM_USER", granular=(), scopes=None, me_accounts=None, page_lookup=None,
-                businesses=None, business_edges=None, profile_ok=True, calls=None):
+                businesses=None, business_edges=None, profile_ok=True, calls=None, me_info=None, assigned=None):
     """me_accounts: None → ошибка 100 (ребро недоступно), [] → пусто, [page…] → страницы.
-    business_edges: {edge_name: [items]} — остальные рёбра отвечают ошибкой 100."""
+    businesses: None → «Missing Permission». business_edges: {edge: [items]}, остальные → «Missing Permission».
+    me_info: ответ /me (по умолчанию {"id": SU_ID}). assigned: None → «Missing Permission», [] / [items]."""
+    me_info = {"id": SU_ID} if me_info is None else me_info
     scopes = scopes if scopes is not None else ["instagram_basic", "instagram_manage_insights"]
     page_lookup, business_edges = page_lookup or {}, business_edges or {}
 
@@ -55,10 +61,15 @@ def make_router(token_type="SYSTEM_USER", granular=(), scopes=None, me_accounts=
         if p.endswith("/me/accounts"):
             return err() if me_accounts is None else httpx.Response(200, json={"data": me_accounts})
         if p.endswith("/me/businesses"):
-            return err() if businesses is None else httpx.Response(200, json={"data": [{"id": b} for b in businesses]})
-        for edge in ("instagram_business_accounts", "instagram_accounts"):
+            return err(100, MISSING) if businesses is None else httpx.Response(200, json={"data": [{"id": b} for b in businesses]})
+        if p.endswith("/assigned_instagram_accounts"):
+            assert p.split("/")[-2] == SU_ID
+            return err(100, MISSING) if assigned is None else httpx.Response(200, json={"data": assigned})
+        for edge in ("owned_instagram_accounts", "instagram_business_accounts", "instagram_accounts"):
             if p.endswith(f"/{edge}"):
-                return httpx.Response(200, json={"data": business_edges[edge]}) if edge in business_edges else err()
+                return httpx.Response(200, json={"data": business_edges[edge]}) if edge in business_edges else err(100, MISSING)
+        if p.endswith("/me"):
+            return httpx.Response(200, json=me_info)
         if "instagram_business_account" in q.get("fields", "") and p.split("/")[-1] in page_lookup:
             return httpx.Response(200, json={"id": p.split("/")[-1], "instagram_business_account": page_lookup[p.split("/")[-1]]})
         if p.endswith(f"/{IG_ID}"):
@@ -133,10 +144,76 @@ def test_username_selection_among_several(conn, meta, monkeypatch):
     assert oauth.complete_login(conn, CODE, transport=t)["ig_user_id"] == IG_ID
 
 
+def test_system_user_assigned_instagram_accounts(conn, meta):
+    """После добавления business_management: системному пользователю назначен аккаунт."""
+    calls = []
+    t = make_router("SYSTEM_USER", granular=[{"scope": "instagram_basic"}, {"scope": "business_management"}],
+                    scopes=["instagram_basic", "instagram_manage_insights", "business_management"],
+                    me_accounts=[], businesses=None, assigned=[{"id": IG_ID, "username": "mironovich.pro"}], calls=calls)
+    res = oauth.complete_login(conn, CODE, transport=t)
+    assert res["account_source"] == "system_user.assigned_instagram_accounts" and res["ig_user_id"] == IG_ID
+    assert any(c.endswith(f"/{SU_ID}/assigned_instagram_accounts") for c in calls)
+
+
+def test_client_business_id_owned_instagram_accounts(conn, meta):
+    t = make_router("SYSTEM_USER", granular=[{"scope": "instagram_basic"}],
+                    scopes=["instagram_basic", "business_management"], me_accounts=[], businesses=None,
+                    me_info={"id": SU_ID, "client_business_id": BIZ_ID}, assigned=[],
+                    business_edges={"owned_instagram_accounts": [{"id": IG_ID, "username": "mironovich.pro"}]})
+    res = oauth.complete_login(conn, CODE, transport=t)
+    assert res["account_source"] == "business.owned_instagram_accounts"
+    rep = oauth.last_login_attempt(conn)
+    probe = next(p for p in rep["probes"] if p["method"] == "Системный пользователь и бизнес клиента")
+    assert probe["note"] == "client_business_id получен" and probe["found"] == 1
+    assert_anonymous(rep, meta)
+
+
+def test_user_token_skips_system_user_endpoints(conn, meta):
+    calls = []
+    page = {"id": PAGE_ID, "access_token": "EAApageTOKEN000000000009",
+            "instagram_business_account": {"id": IG_ID, "username": "mironovich.pro"}}
+    t = make_router("USER", granular=[], me_accounts=[page], calls=calls)
+    oauth.complete_login(conn, CODE, transport=t)
+    assert not any(c.endswith("/assigned_instagram_accounts") for c in calls)
+    assert not any(c.endswith("/me") for c in calls)
+
+
+def test_all_probe_endpoints_documented(conn, meta):
+    t = make_router("SYSTEM_USER", granular=[{"scope": "instagram_basic"}, {"scope": "pages_show_list", "target_ids": [PAGE_ID]}],
+                    me_accounts=[], businesses=[BIZ_ID], me_info={"id": SU_ID, "client_business_id": BIZ_ID}, assigned=[])
+    with pytest.raises(oauth.LoginFailure):
+        oauth.complete_login(conn, CODE, transport=t)
+    for p in oauth.last_login_attempt(conn)["probes"]:
+        assert p["doc"], f"endpoint без ссылки на документацию: {p['endpoint']}"
+
+
 # ---------------- понятные причины неудачи ----------------
 
+PROD_SCOPES = ["instagram_basic", "instagram_manage_comments", "instagram_manage_insights",
+               "instagram_content_publish", "instagram_manage_messages", "public_profile"]
+
+
+def test_production_scenario_business_management_missing(conn, meta):
+    """Реальная диагностика Railway: SYSTEM_USER, instagram-разрешения без target_ids,
+    /me/accounts пуст, /me/businesses → 400 code 100 Missing Permission."""
+    t = make_router("SYSTEM_USER", granular=[{"scope": s} for s in PROD_SCOPES], scopes=PROD_SCOPES,
+                    me_accounts=[], businesses=None, me_info={"id": SU_ID}, assigned=[])
+    with pytest.raises(oauth.LoginFailure) as e:
+        oauth.complete_login(conn, CODE, transport=t)
+    assert e.value.reason == "business_management_missing" and "business_management" in str(e.value)
+    rep = oauth.last_login_attempt(conn)
+    assert "GET /me/businesses" in rep["missing_permission_endpoints"]
+    methods = {p["method"]: p for p in rep["probes"]}
+    assert methods["Instagram-аккаунты, назначенные системному пользователю"]["note"].startswith("пустой список")
+    assert methods["Бизнес-портфолио пользователя"]["doc"] == "Graph API · User · businesses"
+    assert methods["Страницы пользователя"]["note"] == "страниц: 0"
+    assert_anonymous(rep, meta)
+    assert conn.execute("SELECT COUNT(*) FROM oauth_tokens").fetchone()[0] == 0
+
+
 def test_nothing_found_reason_and_report(conn, meta):
-    t = make_router("SYSTEM_USER", granular=[{"scope": "instagram_basic"}], me_accounts=None, businesses=None)
+    t = make_router("SYSTEM_USER", granular=[{"scope": "instagram_basic"}, {"scope": "business_management"}],
+                    scopes=["instagram_basic", "business_management"], me_accounts=None, businesses=None)
     with pytest.raises(oauth.LoginFailure) as e:
         oauth.complete_login(conn, CODE, transport=t)
     assert e.value.reason == "no_instagram_found"
@@ -248,7 +325,8 @@ def _login_state(client):
 def test_web_failure_shows_reason_and_report(web, monkeypatch):
     client, c = web
     from app.meta import client as mc
-    t = make_router("SYSTEM_USER", granular=[{"scope": "instagram_basic"}], me_accounts=None, businesses=None)
+    t = make_router("SYSTEM_USER", granular=[{"scope": "instagram_basic"}], scopes=PROD_SCOPES,
+                    me_accounts=[], businesses=None, assigned=[])
     monkeypatch.setattr(mc, "exchange_code", lambda code, transport=None: {"access_token": TOKENS["SYSTEM_USER"]})
     monkeypatch.setattr(oauth, "exchange_code", lambda code, transport=None: {"access_token": TOKENS["SYSTEM_USER"]})
     monkeypatch.setattr(oauth, "debug_token", lambda tok, transport=None: mc.debug_token(tok, transport=t))
@@ -257,12 +335,12 @@ def test_web_failure_shows_reason_and_report(web, monkeypatch):
                         real(self, token, version, t, app_secret))
     state = _login_state(client)
     r = client.get(f"/meta/callback?code={CODE}&state={state}", auth=("u", "pw"))
-    assert "Подключение не выполнено" in r.text and "ни один способ не вернул Instagram-аккаунт" in r.text
+    assert "Подключение не выполнено" in r.text and "нет разрешения business_management" in r.text
     assert "Последняя попытка подключения" in r.text and "без target_ids" in r.text
     for s in (CODE, TOKENS["SYSTEM_USER"], SECRET):
         assert s not in r.text
     js = client.get("/meta/login-attempts.json", auth=("u", "pw")).json()
-    assert js[0]["reason"] == "no_instagram_found" and CODE not in json.dumps(js)
+    assert js[0]["reason"] == "business_management_missing" and CODE not in json.dumps(js)
 
 
 def test_web_state_failure_recorded(web):

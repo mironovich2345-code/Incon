@@ -11,9 +11,14 @@ Facebook-страницы и того, выдан ли доступ к конк�
   2. GET /me/accounts → instagram_business_account у страниц (если страница есть).
   3. GET /{page-id}?fields=instagram_business_account — для страниц из target_ids
      разрешений pages_* (если /me/accounts пуст или недоступен).
-  4. GET /me/businesses и бизнесы из target_ids business_management →
-     GET /{business-id}/instagram_business_accounts и /{business-id}/instagram_accounts.
-     Это пробы: если ребро недоступно для токена, фиксируется ошибка, вход продолжается.
+  4. Только для SYSTEM_USER (токен бизнес-интеграции, BISU):
+     GET /me?fields=id,client_business_id — задокументировано в Facebook Login for Business;
+     GET /{system-user-id}/assigned_instagram_accounts — Marketing API, узел System User.
+  5. Бизнесы: client_business_id, /me/businesses (User → businesses) и target_ids business_management →
+     GET /{business-id}/owned_instagram_accounts, /instagram_accounts, /instagram_business_accounts
+     (Marketing API, узел Business).
+  Используются только задокументированные Meta endpoints. Если endpoint недоступен для токена
+  (например, «Missing Permission»), это фиксируется в протоколе, вход продолжается.
 
 Каждый найденный ID проверяется запросом профиля GET /{ig-id}?fields=id,username.
 
@@ -39,6 +44,25 @@ def anonymize(text: str | None) -> str | None:
     return _HANDLE.sub("@<user>", _LONG_NUM.sub("<id>", scrub(str(text))))[:300]
 
 
+# Где задокументирован каждый endpoint (для протокола и аудита).
+DOCS = {
+    "GET /debug_token": "Graph API · debug_token",
+    "GET /me/accounts": "Graph API · User · accounts",
+    "GET /{page-id}?fields=instagram_business_account": "Instagram API with Facebook Login · Page",
+    "GET /me?fields=id,client_business_id": "Facebook Login for Business · client_business_id",
+    "GET /{system-user-id}/assigned_instagram_accounts": "Marketing API · System User · assigned_instagram_accounts",
+    "GET /me/businesses": "Graph API · User · businesses",
+    "GET /{business-id}/owned_instagram_accounts": "Marketing API · Business · owned_instagram_accounts",
+    "GET /{business-id}/instagram_accounts": "Marketing API · Business · instagram_accounts",
+    "GET /{business-id}/instagram_business_accounts": "Marketing API · Business · instagram_business_accounts",
+    "GET /{ig-user-id}?fields=id,username": "Instagram API with Facebook Login · IG User",
+}
+
+
+def is_missing_permission(p: "Probe") -> bool:
+    return (not p.ok) and p.error_code in {10, 100, 200} and "permission" in (p.message or "").lower()
+
+
 @dataclass
 class Probe:
     method: str            # человекочитаемое имя способа
@@ -52,6 +76,11 @@ class Probe:
     error_kind: str | None = None
     message: str | None = None
     note: str | None = None
+    doc: str | None = None
+
+    def __post_init__(self):
+        if self.doc is None:
+            self.doc = DOCS.get(self.endpoint)
 
 
 @dataclass
@@ -99,7 +128,7 @@ def _targets(debug_data: dict, predicate) -> list[str]:
     return ids
 
 
-def discover(client: GraphClient, debug_data: dict, max_objects: int = 10) -> DiscoveryResult:
+def discover(client: GraphClient, debug_data: dict, max_objects: int = 10, token_type: str | None = None) -> DiscoveryResult:
     res = DiscoveryResult()
     seen: dict[str, Candidate] = {}
 
@@ -144,8 +173,31 @@ def discover(client: GraphClient, debug_data: dict, max_objects: int = 10) -> Di
         res.probes.append(_probe_from("Страница из granular_scopes", "GET /{page-id}?fields=instagram_business_account",
                                       r, found=1 if iga else 0))
 
-    # 4. бизнес-портфолио
     business_ids = _targets(debug_data, lambda s: s == "business_management")
+
+    # 4. системный пользователь бизнес-интеграции (SYSTEM_USER)
+    token_type = (token_type or (debug_data or {}).get("type") or "").upper()
+    if token_type == "SYSTEM_USER":
+        r = client.call("/me", fields="id,client_business_id")
+        me = r.data if r.ok and isinstance(r.data, dict) else {}
+        cb = me.get("client_business_id")
+        if cb and str(cb) not in business_ids:
+            business_ids.insert(0, str(cb))
+        res.probes.append(_probe_from("Системный пользователь и бизнес клиента", "GET /me?fields=id,client_business_id",
+                                      r, found=1 if cb else 0,
+                                      note=("client_business_id получен" if cb else "client_business_id не вернулся") if r.ok else None))
+        if me.get("id"):
+            r = client.call(f"/{me['id']}/assigned_instagram_accounts", fields="id,username", limit=50)
+            items = (r.data or {}).get("data", []) if r.ok else []
+            for it in items:
+                if it.get("id"):
+                    add(it["id"], "system_user.assigned_instagram_accounts", username=it.get("username", ""))
+            res.probes.append(_probe_from("Instagram-аккаунты, назначенные системному пользователю",
+                                          "GET /{system-user-id}/assigned_instagram_accounts", r, found=len(items),
+                                          note="пустой список: системному пользователю не назначен ни один Instagram-аккаунт"
+                                          if r.ok and not items else None))
+
+    # 5. бизнес-портфолио
     r = client.call("/me/businesses", fields="id", limit=25)
     if r.ok:
         for b in (r.data or {}).get("data", []):
@@ -154,7 +206,7 @@ def discover(client: GraphClient, debug_data: dict, max_objects: int = 10) -> Di
     res.probes.append(_probe_from("Бизнес-портфолио пользователя", "GET /me/businesses", r,
                                   found=len((r.data or {}).get("data", [])) if r.ok else 0))
     for bid in business_ids[:max_objects]:
-        for edge in ("instagram_business_accounts", "instagram_accounts"):
+        for edge in ("owned_instagram_accounts", "instagram_accounts", "instagram_business_accounts"):
             r = client.call(f"/{bid}/{edge}", fields="id,username", limit=50)
             items = (r.data or {}).get("data", []) if r.ok else []
             for it in items:

@@ -47,6 +47,7 @@ Meta `target_ids` не показываются, если разрешение �
 | Причина | Что значит | Что делать |
 |---|---|---|
 | `no_instagram_scopes` | в токене нет instagram-разрешений | в конфигурации входа нет `instagram_basic` — потребуется правка конфигурации (отдельное согласование) |
+| `business_management_missing` | SYSTEM_USER без `business_management`, бизнес-endpoints отвечают «Missing Permission» | см. [08-system-user-discovery.md](08-system-user-discovery.md), раздел 8.4 |
 | `no_instagram_found` | разрешения есть, но ни один способ не вернул аккаунт | по таблице проб видно, какие запросы отклонены и с каким кодом; пришлите отчёт |
 | `profile_unreadable` | аккаунт найден, профиль не читается | код ошибки в отчёте; обычно нехватка `instagram_basic` на этот аккаунт |
 | `exchange_failed` | обмен code не прошёл | проверить `META_APP_SECRET` и Redirect URI |

@@ -63,10 +63,11 @@ def run(conn: sqlite3.Connection, transport: httpx.BaseTransport | None = None, 
         # 1a. Все способы найти Instagram-аккаунт — какие реально работают с этим токеном
         if r.ok:
             with GraphClient(ltoken, transport=transport) as lc:
-                found = discover(lc, d)
+                found = discover(lc, d, token_type=d.get("type"))
             for p in found.probes:
                 steps.append({"step": f"Поиск аккаунта: {p.method}", "ok": p.ok, "http_status": p.http_status,
-                              "path": p.endpoint, "summary": f"найдено: {p.found}" + (f"; {p.note}" if p.note else ""),
+                              "path": p.endpoint, "summary": f"найдено: {p.found}" + (f"; {p.note}" if p.note else "")
+                              + (f"; документация: {p.doc}" if p.doc else ""),
                               "error": {"code": p.error_code, "subcode": p.error_subcode, "kind": p.error_kind,
                                         "message": p.message} if not p.ok else None})
 

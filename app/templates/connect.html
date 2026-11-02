@@ -43,14 +43,15 @@
     {% for g in attempt.granular_scopes %}{{ g.scope }} ({{ 'target_ids: ' ~ g.target_ids if g.target_ids else 'без target_ids' }}){{ '; ' if not loop.last }}{% endfor %}</p>{% endif %}
   {% if attempt.probes %}
   <div class="scroll"><table class="dense">
-    <thead><tr><th>Способ поиска</th><th>Запрос (шаблон)</th><th>HTTP</th><th>Найдено</th><th>Ошибка Meta</th><th>Примечание</th></tr></thead>
+    <thead><tr><th>Способ поиска</th><th>Запрос (шаблон)</th><th>HTTP</th><th>Найдено</th><th>Ошибка Meta</th><th>Примечание</th><th>Документация</th></tr></thead>
     <tbody>{% for p in attempt.probes %}
       <tr><td>{{ p.method }}</td><td><code>{{ p.endpoint }}</code></td><td>{{ p.http_status if p.http_status is not none else '—' }}</td>
       <td><span class="tag {{ 'ok' if p.found else ('not_checked' if p.ok else 'error') }}">{{ p.found }}</span></td>
       <td><small>{% if p.error_code %}code {{ p.error_code }}{% if p.error_subcode %}/{{ p.error_subcode }}{% endif %} · {{ p.message }}{% endif %}</small></td>
-      <td><small>{{ p.note or '' }}</small></td></tr>
+      <td><small>{{ p.note or '' }}</small></td><td><small>{{ p.doc or '' }}</small></td></tr>
     {% endfor %}</tbody></table></div>
   {% endif %}
+  {% if attempt.missing_permission_endpoints %}<p class="muted">Отклонены с «Missing Permission»: {{ attempt.missing_permission_endpoints|join(', ') }}</p>{% endif %}
   <p class="muted">Отчёт обезличен: токены, коды авторизации, ID и имена аккаунтов не сохраняются.</p>
 </section>
 {% endif %}
