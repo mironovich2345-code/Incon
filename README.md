@@ -4,8 +4,10 @@
 сотрудники, продажи, обучение, автоматизация, ИИ). Цель — найти форматы, которые дают просмотры,
 подписки и B2B-заявки.
 
-**Этап 1 (MVP) работает без Meta API — на ручном импорте данных.** API подключается позже
-и только после вашего подтверждения (см. [docs/03-implementation-plan.md](docs/03-implementation-plan.md)).
+Основной источник данных — официальный Instagram API (Facebook Login for Business / Unified Login,
+только чтение). CSV-импорт — резервный способ: пока API не подключён и для данных, которых в API нет.
+Подключение: [docs/04-meta-app-setup.md](docs/04-meta-app-setup.md), аудит и диагностика:
+[docs/05-audit-and-connection.md](docs/05-audit-and-connection.md).
 
 ## Что умеет
 | Раздел | Возможности |
@@ -20,6 +22,7 @@
 | Утверждение | черновики публикаций, отправка на утверждение, история решений. **Без автопубликации** |
 | Отчёты | автоотчёт по данным и рекомендации Claude |
 | Метрики | что доступно через API, что нет и почему; результат реальной проверки |
+| API | вход через Meta, диагностика доступа (HTTP-статусы, коды ошибок), состояние токена, синхронизация |
 
 ## Принципы
 - Только официальные API Meta. Никакого скрейпинга, обхода CAPTCHA, автоматизации сессий Instagram.
@@ -33,11 +36,18 @@ pip install -r requirements.txt
 ```bash
 cp .env.example .env
 ```
+Без API (только CSV):
 ```bash
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
-Откройте http://127.0.0.1:8000, укажите свой username и число подписчиков, импортируйте данные
-(примеры формата — в `samples/`).
+С Instagram API — по HTTPS, адрес совпадает с Redirect URI `https://localhost:8000/meta/callback`:
+```bash
+python -m app.cli dev-cert
+```
+```bash
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --ssl-keyfile data/tls/localhost.key --ssl-certfile data/tls/localhost.crt
+```
+Затем страница «API» → «Войти через Meta» → «Запустить диагностику».
 
 Нужен `ffmpeg` для референсов. Для локальной транскрипции речи — `pip install faster-whisper`
 (иначе загружайте субтитры .srt/.vtt/.txt). Для функций Claude — `ANTHROPIC_API_KEY` в `.env`;
@@ -52,4 +62,5 @@ python -m pytest -q
 1. [Исследование Meta API, авторизация, разрешения, доступность метрик](docs/01-meta-api-research.md)
 2. [Архитектура](docs/02-architecture.md)
 3. [Пошаговый план](docs/03-implementation-plan.md)
-4. [Настройка Meta-приложения (когда решите подключать API)](docs/04-meta-app-setup.md)
+4. [Настройка существующего Meta-приложения и Redirect URI](docs/04-meta-app-setup.md)
+5. [Технический аудит, совместимость, запросы после подключения](docs/05-audit-and-connection.md)

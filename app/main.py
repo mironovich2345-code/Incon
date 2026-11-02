@@ -21,7 +21,7 @@ from . import analytics, claude_ai, classify, importers, planner, publishing, re
 from .config import BASE_DIR, settings
 from .db import connect, get_or_create_account, init_db, kv_get, kv_set, normalize_username, own_account, row, rows
 from .metrics import CATALOG, SCOPE_LABELS, STATUS_LABELS, by_scope
-from .security import TokenStoreError, delete_tokens, save_token, token_status
+from .security import TokenStoreError, delete_tokens, token_status
 
 app = FastAPI(title="Instagram Content Intelligence", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="static")
@@ -62,6 +62,7 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx.setdefault("flash", request.query_params.get("msg"))
     ctx.setdefault("error", request.query_params.get("err"))
     ctx["own"] = own_account(conn)
+    ctx["reauth"] = kv_get(conn, "reauth_required") if settings.meta_api_enabled else None
     return templates.TemplateResponse(request, name, ctx)
 
 
@@ -462,54 +463,84 @@ def report_detail(request: Request, rid: int):
 
 
 # ---------------- Подключение Meta API ----------------
+def _secure_cookie() -> bool:
+    return settings.meta_redirect_uri.startswith("https://")
+
+
 @app.get("/connect", response_class=HTMLResponse, dependencies=D)
 def connect_page(request: Request):
-    return render(request, "connect.html", tokens=token_status(conn), ig_user_id=kv_get(conn, "ig_user_id"),
-                  last_sync=kv_get(conn, "last_sync"))
+    from .meta.diagnostics import last_report
+    return render(request, "connect.html", tokens=token_status(conn), problems=settings.meta_config_problems(),
+                  kv={k: kv_get(conn, k) for k in ("ig_user_id", "ig_username", "page_id", "token_type", "account_source",
+                                                  "connected_at", "last_sync", "reauth_required")},
+                  report=last_report(conn))
 
 
 @app.get("/meta/login", dependencies=D)
 def meta_login():
-    if not (settings.meta_api_enabled and settings.meta_configured):
-        return back("/connect", err="API выключен или не настроен (META_API_ENABLED, META_APP_ID, META_APP_SECRET, TOKEN_ENCRYPTION_KEY)")
-    from .meta.client import oauth_dialog_url
-    state = secrets.token_urlsafe(24)
-    kv_set(conn, "oauth_state", f"{state}:{int(time.time())}")
-    return RedirectResponse(oauth_dialog_url(state))
+    from .meta.client import GraphError, oauth_dialog_url
+    from .meta.oauth import STATE_COOKIE, STATE_TTL, new_state
+    if not settings.meta_api_enabled:
+        return back("/connect", err="META_API_ENABLED=false — включите API в .env")
+    problems = settings.meta_config_problems()
+    if problems:
+        return back("/connect", err="Настройка не завершена: " + "; ".join(problems))
+    state = new_state(conn)
+    try:
+        url = oauth_dialog_url(state)
+    except GraphError as exc:
+        return back("/connect", err=str(exc))
+    resp = RedirectResponse(url, status_code=303)
+    # SameSite=Lax: cookie приходит при возврате с facebook.com (top-level GET-редирект).
+    resp.set_cookie(STATE_COOKIE, state, max_age=STATE_TTL, httponly=True, secure=_secure_cookie(),
+                    samesite="lax", path="/meta")
+    return resp
 
 
 @app.get("/meta/callback", dependencies=D)
-def meta_callback(code: str = "", state: str = "", error: str = "", error_description: str = ""):
-    if error:
-        return back("/connect", err=f"Meta: {error_description or error}")
-    saved = (kv_get(conn, "oauth_state") or ":0").split(":")
-    kv_set(conn, "oauth_state", "")
-    if not state or not secrets.compare_digest(state, saved[0]) or time.time() - int(saved[1] or 0) > 600:
-        return back("/connect", err="Неверный или просроченный state (защита от CSRF). Повторите вход.")
-    from .meta.client import GraphClient, GraphError, REQUIRED_SCOPES, exchange_code
+def meta_callback(request: Request, code: str = "", state: str = "", error: str = "", error_reason: str = "",
+                  error_description: str = ""):
+    from .meta.client import GraphError
+    from .meta.oauth import STATE_COOKIE, OAuthError, check_state, complete_login
+
+    def done(resp: RedirectResponse) -> RedirectResponse:
+        resp.delete_cookie(STATE_COOKIE, path="/meta")
+        return resp
+
     try:
-        tok = exchange_code(code)
-        expires = datetime.now() + timedelta(seconds=int(tok.get("expires_in", 0))) if tok.get("expires_in") else None
-        save_token(conn, "meta_user", "me", tok["access_token"], ",".join(REQUIRED_SCOPES), expires)
-        client = GraphClient(tok["access_token"])
-        pages = client.pages_with_instagram()
-        client.close()
-        if not pages:
-            return back("/connect", err="Не найдено Facebook-страниц со связанным профессиональным Instagram-аккаунтом")
-        page = pages[0]
-        # Токен страницы, полученный из долгоживущего user token, не имеет фиксированного срока.
-        save_token(conn, "meta_page", page["id"], page["access_token"], None, None)
-        kv_set(conn, "page_id", page["id"])
-        kv_set(conn, "ig_user_id", page["instagram_business_account"]["id"])
-    except (GraphError, TokenStoreError, KeyError) as exc:
-        return back("/connect", err=f"Ошибка подключения: {exc}")
-    return back("/connect", f"Подключено: @{page['instagram_business_account'].get('username')}")
+        check_state(conn, state, request.cookies.get(STATE_COOKIE))
+    except OAuthError as exc:
+        return done(back("/connect", err=str(exc)))
+    if error:
+        reason = "вы отменили вход или не выдали разрешения" if error_reason == "user_denied" else (error_description or error)
+        return done(back("/connect", err=f"Meta: {reason}"))
+    if not code:
+        return done(back("/connect", err="Meta не вернула code"))
+    try:
+        res = complete_login(conn, code)
+    except (OAuthError, GraphError, TokenStoreError) as exc:
+        return done(back("/connect", err=f"Ошибка подключения: {exc}"))
+    msg = f"Подключено: @{res['ig_username'] or res['ig_user_id']} (токен {res['token_type']}, аккаунт найден через {res['account_source']})"
+    warn = []
+    if res["missing_scopes"]:
+        warn.append("не выданы разрешения: " + ", ".join(res["missing_scopes"]))
+    if res["unneeded_scopes"]:
+        warn.append("выданы лишние разрешения (уберите из конфигурации): " + ", ".join(res["unneeded_scopes"]))
+    return done(back("/connect", msg, "; ".join(warn) or None))
+
+
+def _graph_failure(exc) -> RedirectResponse:
+    from .meta.oauth import mark_reauth
+    if getattr(exc, "kind", "") == "token":
+        mark_reauth(conn, str(exc))
+        return back("/connect", err="Токен Meta недействителен или истёк — войдите заново. " + str(exc))
+    return back("/connect", err=str(exc))
 
 
 @app.post("/meta/sync", dependencies=D)
 def meta_sync(scope: str = Form("all")):
     if not settings.meta_api_enabled:
-        return back("/connect", err="META_API_ENABLED=false — используется ручной импорт")
+        return back("/connect", err="META_API_ENABLED=false — используется резервный ручной импорт")
     from .meta.client import GraphError
     from .meta.sync import client_from_store, sync_competitor, sync_own
     try:
@@ -524,18 +555,49 @@ def meta_sync(scope: str = Form("all")):
         if scope in {"all", "competitors"}:
             for c in rows(conn, "SELECT username FROM accounts WHERE is_own=0 AND tracked=1"):
                 r = sync_competitor(conn, client, ig_user_id, c["username"])
-                msgs.append(f"@{c['username']}: " + (f"{r['media']} публикаций" if r["ok"] else f"ошибка — {r['error']}"))
+                msgs.append(f"@{c['username']}: " + (f"{r['media']} публикаций" if r["ok"] else f"недоступен — {r['error']}"))
     except GraphError as exc:
-        return back("/connect", err=str(exc))
+        return _graph_failure(exc)
     finally:
         client.close()
     kv_set(conn, "last_sync", datetime.now().isoformat(timespec="minutes"))
     return back("/connect", "; ".join(msgs))
 
 
+@app.post("/meta/diagnostics", dependencies=D)
+def meta_diagnostics_run():
+    from .meta import diagnostics
+    if not settings.meta_api_enabled:
+        return back("/connect", err="META_API_ENABLED=false")
+    try:
+        rep = diagnostics.run(conn)
+    except TokenStoreError as exc:
+        return back("/connect", err=str(exc))
+    return back("/connect", "Диагностика завершена" + ("" if rep["ok"] else ": есть проблемы — см. таблицу"))
+
+
+@app.get("/meta/diagnostics.json", dependencies=D)
+def meta_diagnostics_json():
+    from fastapi.responses import JSONResponse
+    from .meta.diagnostics import last_report
+    return JSONResponse(last_report(conn) or {"status": "not_run"})
+
+
+@app.get("/meta/health", dependencies=D)
+def meta_health():
+    from fastapi.responses import JSONResponse
+    from .meta.oauth import token_health
+    if not (settings.meta_app_id and settings.meta_app_secret):
+        return JSONResponse({"status": "not_configured"})
+    try:
+        return JSONResponse(token_health(conn))
+    except TokenStoreError as exc:
+        return JSONResponse({"status": "error", "error": str(exc)}, status_code=500)
+
+
 @app.post("/meta/disconnect", dependencies=D)
 def meta_disconnect():
     delete_tokens(conn)
-    for k in ("ig_user_id", "page_id"):
+    for k in ("ig_user_id", "ig_username", "page_id", "token_type", "account_source", "auth_provider", "reauth_required"):
         kv_set(conn, k, "")
-    return back("/connect", "Токены удалены с сервера")
+    return back("/connect", "Токены удалены с сервера. Доступ приложения также можно отозвать в настройках Facebook → Бизнес-интеграции.")

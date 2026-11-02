@@ -1,6 +1,7 @@
 # 1. Официальные Instagram API от Meta: исследование и выбор
 
-> Дата проверки: 02.11.2026.
+> Дата проверки: 02.11.2026. **Обновление:** подробности о конфигурации Unified Login существующего
+> приложения, минимальных разрешениях и диагностике — в [05-audit-and-connection.md](05-audit-and-connection.md).
 > **Ограничение проверки:** в облачной среде, где писался проект, домен `developers.facebook.com`
 > заблокирован сетевой политикой, поэтому страницы Meta не открывались напрямую. Сведения собраны
 > через поиск по официальной документации Meta (фрагменты страниц) и сверены со сторонними
@@ -30,16 +31,19 @@ Instagram Basic Display API закрыт в декабре 2024 — его не 
 Что нужно от вас (делаете сами, мы ничего не создаём без подтверждения):
 1. Instagram-аккаунт переведён в профессиональный (Business или Creator).
 2. Аккаунт привязан к Facebook-странице (Meta Business Suite → Настройки → Аккаунты Instagram).
-3. Создано Meta-приложение типа «Business» с продуктом «Facebook Login for Business» — инструкция
-   в [04-meta-app-setup.md](04-meta-app-setup.md).
+3. Meta-приложение «Content Intelligence» уже создано (сценарий «Управление сообщениями и контентом
+   в Instagram», конфигурация Unified Login) — настройка по [04-meta-app-setup.md](04-meta-app-setup.md).
 
 Поток авторизации (OAuth 2.0, Authorization Code):
 ```
-Браузер → /meta/login → facebook.com/{v}/dialog/oauth (вы входите на сайте Meta)
-        → /meta/callback?code&state  (проверка state против CSRF, TTL 10 мин)
-Сервер  → обмен code на короткий user token → обмен на долгоживущий (~60 дней)
+Браузер → /meta/login → facebook.com/{v}/dialog/oauth?config_id=…&response_type=code
+                         &override_default_response_type=true   (вы входите на сайте Meta)
+        → /meta/callback?code&state  (state: cookie + БД, одноразовый, TTL 10 мин)
+Сервер  → обмен code на токен → debug_token (тип USER / SYSTEM_USER, срок, разрешения)
+        → для USER: обмен на долгоживущий (~60 дней)
         → /me/accounts → токен страницы + id Instagram-аккаунта
-        → токены шифруются (Fernet) и сохраняются в SQLite на сервере
+          (запасной путь: granular_scopes.target_ids из debug_token)
+        → токены шифруются (Fernet) и атомарно заменяют старые в SQLite на сервере
 ```
 - Пароль от Instagram/Facebook приложение не видит и не хранит.
 - `app_secret` и ключ шифрования — только в переменных окружения сервера.
@@ -53,6 +57,9 @@ App Review и Advanced Access нужны, только если подключа
 приложения: требования к Business Verification для `business_management`.
 
 ### Минимальный набор разрешений
+Новые приложения Meta не принимают `scope` в диалоге входа — разрешения задаются в конфигурации
+(Configuration ID → `META_LOGIN_CONFIG_ID`).
+
 | Разрешение | Зачем |
 |---|---|
 | `instagram_basic` | профиль, список медиа, Business Discovery |

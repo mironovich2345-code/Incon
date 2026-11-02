@@ -1,32 +1,108 @@
-# 4. Настройка Meta-приложения (выполняете вы, когда решите подключать API)
+# 4. Настройка существующего приложения Meta «Content Intelligence»
 
-> Мы не создаём приложение и не меняем настройки аккаунта за вас. Названия пунктов в кабинете
-> Meta периодически меняются — сверяйтесь с текущим интерфейсом developers.facebook.com.
+> Новое приложение не создаём. Приложение не публикуем (оно остаётся в режиме разработки /
+> Development). Сайт mironovich.pro не трогаем. Названия пунктов кабинета Meta периодически
+> меняются — ориентируйтесь на смысл шага.
 
-## Предварительно
-1. Instagram → Настройки → Тип аккаунта → **Профессиональный** (Business или Creator).
-2. Meta Business Suite → Настройки → Аккаунты Instagram → привязать Instagram к Facebook-странице.
+## Что уже есть
+- Приложение **Content Intelligence**.
+- Сценарий (use case) **«Управление сообщениями и контентом в Instagram»**.
+- Конфигурация **Unified Login** — для новых приложений Meta это вход Facebook Login for Business
+  с `config_id` (старый вход «API setup with Instagram login» новым приложениям недоступен,
+  а запрос с параметром `scope` они отклоняют с ошибкой «Invalid Scopes»).
 
-## Приложение
-1. developers.facebook.com → My Apps → **Create App** → тип/сценарий для бизнеса
-   (Business; use case для управления Instagram через Facebook Login for Business).
-2. Добавить продукт **Facebook Login for Business**.
-3. Valid OAuth Redirect URIs: `https://<ваш-домен>/meta/callback`
-   (для локального теста — `http://localhost:8000/meta/callback`, если кабинет разрешит).
-4. Создать **Configuration** для Facebook Login for Business с разрешениями:
-   `instagram_basic`, `instagram_manage_insights`, `pages_show_list`, `pages_read_engagement`
-   (+ `business_management`, если страница в бизнес-портфолио). **Не добавлять** `instagram_content_publish`.
-   Скопировать Configuration ID → `META_LOGIN_CONFIG_ID`.
-5. App ID → `META_APP_ID`, App Secret → `META_APP_SECRET` (только в `.env` на сервере).
-6. Убедиться, что ваш Facebook-пользователь — администратор приложения (тогда App Review не нужен).
+## Redirect URI
+Зарегистрируйте **ровно эту строку** (без слэша в конце, без параметров):
 
-## Сервер
+```
+https://localhost:8000/meta/callback
+```
+
+Она совпадает со значением по умолчанию `META_REDIRECT_URI` и используется при запуске приложения
+на вашем компьютере по HTTPS (см. «Запуск» ниже). Если позже приложение будет развёрнуто на сервере,
+добавьте второй URI вида `https://<домен сервера>/meta/callback` и пропишите его в `META_REDIRECT_URI`.
+Сайт mironovich.pro для этого менять не нужно — можно использовать отдельный поддомен или другой хост.
+
+## Шаги в Meta Developers
+
+### 1. Настройки входа
+App Dashboard → Use cases → «Управление сообщениями и контентом в Instagram» → Customize →
+настройка через Facebook Login (Facebook Login for Business) → Settings:
+- **Valid OAuth Redirect URIs:** `https://localhost:8000/meta/callback`
+- **Client OAuth login:** включено; **Web OAuth login:** включено
+- **Enforce HTTPS:** включено; **Use Strict Mode for redirect URIs:** включено (URI должен совпадать посимвольно)
+- Если в кабинете есть «Login with the JavaScript SDK» — не нужен, оставьте выключенным.
+
+### 2. Разрешения в сценарии
+В списке разрешений сценария должны быть (при необходимости нажмите «Add» напротив):
+
+| Разрешение | Зачем | Обязательно |
+|---|---|---|
+| `instagram_basic` | профиль, список публикаций, Business Discovery | да |
+| `instagram_manage_insights` | статистика Reels и аккаунта | да |
+| `pages_show_list` | найти Facebook-страницу, к которой привязан Instagram | да |
+| `pages_read_engagement` | чтение данных страницы и связанного Instagram | да |
+| `business_management` | только если страница принадлежит бизнес-портфолио и без него `/me/accounts` пуст | по ситуации |
+
+Сценарий «сообщения и контент» по умолчанию может предлагать `instagram_manage_messages`,
+`instagram_manage_comments`, `instagram_content_publish`, `pages_manage_metadata`. Для Content
+Intelligence они **не нужны**: не добавляйте их в конфигурацию входа (шаг 3). Если кабинет не даёт
+убрать какое-то разрешение из сценария — достаточно не включать его в конфигурацию; диагностика
+покажет, если лишнее разрешение всё равно выдано.
+
+### 3. Конфигурация Unified Login
+App Dashboard → Facebook Login for Business → **Configurations** → откройте вашу конфигурацию
+(или создайте новую рядом со старой, если существующую нельзя редактировать):
+- **Login variation:** General.
+- **Access token type:** *User access token* — предпочтительно: токен страницы, полученный через него,
+  даёт доступ к Business Discovery через вашу страницу. Если кабинет предлагает Instagram-разрешения
+  только для *System-user access token*, используйте его — код поддерживает оба типа и определяет тип
+  через `debug_token`.
+- **Token expiration:** для user token — 60 дней; для system-user — Never.
+- **Assets:** Pages и Instagram accounts (выберите свою страницу и Instagram-аккаунт).
+- **Permissions:** только `instagram_basic`, `instagram_manage_insights`, `pages_show_list`,
+  `pages_read_engagement` (+ `business_management` по ситуации).
+- Сохраните и скопируйте **Configuration ID** → `META_LOGIN_CONFIG_ID`.
+
+### 4. Роли и режим
+- App Roles: ваш Facebook-пользователь — **Administrator** (или Developer/Tester). В режиме
+  разработки разрешения работают для пользователей с ролью в приложении — App Review и публикация
+  приложения не нужны.
+- **Не переключайте** приложение в режим Live.
+- App Settings → Advanced → **Require App Secret** можно включить: клиент отправляет `appsecret_proof`.
+
+### 5. Ключи
+App Settings → Basic: **App ID** → `META_APP_ID`, **App Secret** → `META_APP_SECRET`.
+Секреты вписываются только в файл `.env` на компьютере/сервере. Файл `.env` исключён из Git.
+
+### 6. Instagram и страница
+- Instagram-аккаунт — профессиональный (Business или Creator).
+- Привязан к Facebook-странице, на которой у вас есть полный доступ
+  (Meta Business Suite → Настройки → Аккаунты Instagram).
+
+## Запуск на своём компьютере по HTTPS
+```bash
+pip install -r requirements.txt
+```
+```bash
+cp .env.example .env
+```
 ```bash
 python -m app.cli gen-key
 ```
-Вставить результат в `TOKEN_ENCRYPTION_KEY`, задать `META_API_ENABLED=true`, `APP_PASSWORD`,
-перезапустить приложение, открыть «API» → «Войти через Meta».
+Вставьте результат в `TOKEN_ENCRYPTION_KEY`, заполните `META_APP_ID`, `META_APP_SECRET`,
+`META_LOGIN_CONFIG_ID`, `APP_PASSWORD`, установите `META_API_ENABLED=true`.
+```bash
+python -m app.cli dev-cert
+```
+```bash
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --ssl-keyfile data/tls/localhost.key --ssl-certfile data/tls/localhost.crt
+```
+Откройте `https://localhost:8000/connect` (браузер предупредит о самоподписанном сертификате —
+это ожидаемо для локального запуска), введите пароль из `APP_PASSWORD`, проверьте, что блок
+«Настройка» без замечаний, нажмите **«Войти через Meta»**, выберите страницу и Instagram-аккаунт,
+затем **«Запустить диагностику»**.
 
 ## Отключение
-«API» → «Удалить токены» удаляет токены с сервера. Дополнительно можно отозвать доступ приложения
-в настройках Facebook → Бизнес-интеграции.
+«API» → «Удалить токены» удаляет токены с сервера. Доступ приложения также отзывается в
+Facebook → Настройки → Бизнес-интеграции.

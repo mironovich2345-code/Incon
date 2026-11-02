@@ -207,6 +207,13 @@ CREATE TABLE IF NOT EXISTS oauth_tokens (
     UNIQUE(provider, subject)
 );
 
+CREATE TABLE IF NOT EXISTS diagnostic_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_json TEXT NOT NULL,      -- без токенов и секретов
+    ok INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,
     value TEXT

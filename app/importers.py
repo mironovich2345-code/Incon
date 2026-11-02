@@ -1,4 +1,7 @@
-"""Ручной импорт данных (MVP до подключения API).
+"""Ручной импорт данных — резервный способ (основной источник — Instagram API).
+
+Используется, пока API не подключён, для метрик, которых нет в API (заявки, удержание из
+приложения), и для конкурентов, недоступных через Business Discovery.
 
 Поддерживаются CSV с заголовками на русском или английском. Пустая ячейка =
 метрика неизвестна (NULL). Ноль записывается только если в файле явно стоит 0.
@@ -157,16 +160,36 @@ def _apply_classification(rec: dict, caption: str | None) -> None:
     rec["classification_source"] = "manual+rules" if any_manual else "rules"
 
 
+API_SOURCES = {"api", "business_discovery"}
+
+
 def upsert_media(conn: sqlite3.Connection, account_id: int, rec: dict, source: str) -> int:
-    """Вставить/обновить публикацию. Метрики с None не затирают уже известные значения."""
-    key_col = "ig_media_id" if rec.get("ig_media_id") else "permalink"
-    if not rec.get(key_col):
+    """Вставить/обновить публикацию.
+
+    * Поиск существующей записи — по ig_media_id ИЛИ permalink (ролик мог прийти сначала из CSV,
+      потом из API).
+    * None не затирает уже известные значения.
+    * Основной источник — API. Ручной импорт поверх данных API только заполняет пустые поля
+      и не меняет metrics_source, поэтому CSV остаётся резервным способом.
+    """
+    if not rec.get("ig_media_id") and not rec.get("permalink"):
         raise ValueError("нужен ig_media_id или permalink")
-    existing = conn.execute(f"SELECT id FROM media WHERE account_id=? AND {key_col}=?", (account_id, rec[key_col])).fetchone()
+    existing = None
+    if rec.get("ig_media_id"):
+        existing = conn.execute("SELECT id, metrics_source FROM media WHERE account_id=? AND ig_media_id=?",
+                                (account_id, rec["ig_media_id"])).fetchone()
+    if not existing and rec.get("permalink"):
+        existing = conn.execute("SELECT id, metrics_source FROM media WHERE account_id=? AND permalink=?",
+                                (account_id, rec["permalink"])).fetchone()
     cols = [k for k, v in rec.items() if v is not None]
     now = datetime.now().isoformat(timespec="seconds")
     if existing:
-        if cols:
+        if not cols:
+            return existing["id"]
+        if source == "manual" and existing["metrics_source"] in API_SOURCES:
+            sets = ", ".join(f"{c}=COALESCE({c}, ?)" for c in cols)
+            conn.execute(f"UPDATE media SET {sets} WHERE id=?", [rec[c] for c in cols] + [existing["id"]])
+        else:
             sets = ", ".join(f"{c}=?" for c in cols)
             conn.execute(f"UPDATE media SET {sets}, metrics_source=?, metrics_updated_at=? WHERE id=?",
                          [rec[c] for c in cols] + [source, now, existing["id"]])

@@ -47,3 +47,4 @@ pre.md{white-space:pre-wrap;word-wrap:break-word;background:var(--card);border:1
 .refcard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:4px;color:var(--fg)}
 .refcard img{width:100%;border-radius:6px;aspect-ratio:9/16;object-fit:cover}
 code{font-size:12px}
+code.big{font-size:14px;padding:4px 8px;background:var(--bg);border:1px solid var(--line);border-radius:6px;display:inline-block;margin-top:4px;user-select:all}.ok-text{color:var(--ok)}

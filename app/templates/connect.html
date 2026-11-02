@@ -2,24 +2,57 @@
 {% block content %}
 <h1>Подключение Instagram API</h1>
 <section class="card">
-<p>Режим: <b>{{ 'API включён' if settings.meta_api_enabled else 'ручной импорт (API выключен)' }}</b> ·
-Meta-приложение: <b>{{ 'настроено' if settings.meta_configured else 'не настроено' }}</b> · Graph API {{ settings.graph_api_version }}</p>
-<p>Архитектура: <b>Instagram API with Facebook Login for Business</b> — нужна для Business Discovery (данные конкурентов). Вход выполняется на сайте Meta; приложение получает токен, а не пароль. Публикация не запрашивается (разрешение <code>instagram_content_publish</code> не используется).</p>
-{% if settings.meta_api_enabled and settings.meta_configured %}
-  <a class="button" href="/meta/login">Войти через Meta</a>
-  <form method="post" action="/meta/sync" class="row inline">
-    <button name="scope" value="all">Синхронизировать всё</button>
-    <button name="scope" value="own">Только мой аккаунт</button>
-    <button name="scope" value="competitors">Только конкуренты</button>
-  </form>
-  <p class="muted">Последняя синхронизация: {{ last_sync or 'не было' }} · IG user id: {{ ig_user_id or '—' }}</p>
-{% else %}
-  <p class="muted">Чтобы включить: создайте Meta-приложение по инструкции <code>docs/04-meta-app-setup.md</code>, заполните .env и установите META_API_ENABLED=true.</p>
-{% endif %}
+  <h2>Настройка</h2>
+  <p>Режим: <b>{{ 'API включён' if settings.meta_api_enabled else 'API выключен (работает резервный CSV-импорт)' }}</b> · Graph API {{ settings.graph_api_version }}</p>
+  <p>Redirect URI, который должен быть зарегистрирован в Meta <i>точно в таком виде</i>:<br><code class="big">{{ settings.meta_redirect_uri }}</code></p>
+  {% if problems %}<div class="flash warn"><b>Не готово к входу:</b><ul>{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul></div>
+  {% else %}<p class="ok-text">Конфигурация сервера готова.</p>{% endif %}
+  <p class="muted">Вход: Facebook Login for Business (конфигурация Unified Login, параметр config_id). Пароль вводится только на сайте Meta. Права на публикацию, сообщения и рекламу не нужны.</p>
 </section>
+
+<section class="card">
+  <h2>Подключение</h2>
+  {% if kv.ig_user_id %}
+  <p>Аккаунт: <b>@{{ kv.ig_username or '?' }}</b> (IG user id {{ kv.ig_user_id }}) · токен: {{ kv.token_type }} · найден через {{ kv.account_source }} · подключено {{ kv.connected_at }}</p>
+  <p>Последняя синхронизация: {{ kv.last_sync or 'не было' }} · <a href="/meta/health" target="_blank">состояние токена (JSON)</a></p>
+  {% else %}<p class="muted">Не подключено.</p>{% endif %}
+  <div class="row">
+    {% if settings.meta_api_enabled and not problems %}<a class="button" href="/meta/login">{{ 'Войти заново' if kv.ig_user_id else 'Войти через Meta' }}</a>{% endif %}
+    {% if kv.ig_user_id and settings.meta_api_enabled %}
+    <form method="post" action="/meta/diagnostics"><button>Запустить диагностику</button></form>
+    <form method="post" action="/meta/sync" class="row">
+      <button name="scope" value="all">Синхронизировать всё</button>
+      <button name="scope" value="own">Только мой аккаунт</button>
+      <button name="scope" value="competitors">Только конкуренты</button>
+    </form>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card" id="diagnostics">
+  <h2>Диагностика {% if report %}<small>{{ report.started_at }} · {{ 'без ошибок' if report.ok else 'есть проблемы' }} · <a href="/meta/diagnostics.json" target="_blank">JSON</a></small>{% endif %}</h2>
+  {% if report %}
+  <div class="scroll"><table class="dense">
+    <thead><tr><th>Шаг</th><th>Результат</th><th>HTTP</th><th>Запрос (без токена)</th><th>Итог</th><th>Ошибка Meta</th><th>мс</th></tr></thead>
+    <tbody>
+    {% for s in report.steps %}
+    <tr>
+      <td>{{ s.step }}</td>
+      <td><span class="tag {{ 'ok' if s.ok else ('not_checked' if s.ok is none else 'error') }}">{{ 'ok' if s.ok else ('—' if s.ok is none else 'ошибка') }}</span></td>
+      <td>{{ s.http_status if s.http_status is not none else '—' }}</td>
+      <td><code>{{ s.path or '' }}</code>{% if s.params %}<br><small>{% for k, v in s.params.items() %}{{ k }}={{ v }} {% endfor %}</small>{% endif %}</td>
+      <td><small>{{ s.summary }}{% if s.missing_scopes %}<br>не выданы: {{ s.missing_scopes|join(', ') }}{% endif %}{% if s.unneeded_scopes %}<br>лишние: {{ s.unneeded_scopes|join(', ') }}{% endif %}</small></td>
+      <td><small>{% if s.error %}code {{ s.error.code }}{% if s.error.subcode %}/{{ s.error.subcode }}{% endif %} · {{ s.error.kind }} · {{ s.error.message }}{% if s.error.fbtrace_id %}<br>fbtrace_id {{ s.error.fbtrace_id }}{% endif %}{% endif %}</small></td>
+      <td>{{ s.ms or '' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody></table></div>
+  {% else %}<p class="muted">Ещё не запускалась.</p>{% endif %}
+</section>
+
 <section class="card"><h2>Токены на сервере</h2>
-<p class="muted">Хранятся в зашифрованном виде (Fernet). Значения токенов не показываются.</p>
-<table class="dense"><tr><th>Тип</th><th>Объект</th><th>Права</th><th>Истекает</th><th>Получен</th></tr>
+<p class="muted">Хранятся зашифрованными (Fernet). Значения токенов не показываются нигде в интерфейсе.</p>
+<table class="dense"><tr><th>Тип</th><th>Объект</th><th>Разрешения</th><th>Истекает</th><th>Получен</th></tr>
 {% for t in tokens %}<tr><td>{{ t.provider }}</td><td>{{ t.subject }}</td><td><small>{{ t.scopes or '' }}</small></td><td>{{ t.expires_at or 'без фикс. срока' }}</td><td>{{ t.created_at }}</td></tr>{% else %}<tr><td colspan="5" class="muted">Нет</td></tr>{% endfor %}
 </table>
 {% if tokens %}<form method="post" action="/meta/disconnect"><button class="danger">Удалить токены</button></form>{% endif %}

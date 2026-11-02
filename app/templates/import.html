@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Ручной импорт данных</h1>
-<p>MVP работает без API: данные берутся из приложения Instagram (Статистика), из экспорта Meta Business Suite или вводятся вручную. Пустая ячейка = «нет данных». Примеры файлов — в папке <code>samples/</code>.</p>
+<h1>Импорт CSV — резервный способ</h1>
+<div class="flash warn">Основной источник данных — Instagram API (страница «API»). CSV нужен, пока API не подключён, для данных, которых нет в API (B2B-заявки, удержание из приложения), и для конкурентов, недоступных через Business Discovery. Ручной импорт не перезаписывает значения, полученные из API, — только заполняет пустые поля.</div>
+<p>Пустая ячейка = «нет данных». Примеры файлов — в папке <code>samples/</code>.</p>
 <div class="grid3">
 <section class="card"><h2>Мои Reels</h2>
 <form method="post" action="/import/own_reels" enctype="multipart/form-data">

@@ -8,7 +8,6 @@ from .. import classify
 from ..db import get_or_create_account, kv_get
 from ..importers import parse_datetime, record_followers, upsert_media
 from ..metrics import API_TO_COLUMN, REEL_INSIGHT_METRICS
-from ..security import load_token
 from .client import GraphClient, GraphError
 
 
@@ -21,12 +20,13 @@ def _set_availability(conn: sqlite3.Connection, metric: str, scope: str, status:
 
 
 def client_from_store(conn: sqlite3.Connection) -> tuple[GraphClient, str]:
+    from .oauth import active_token
     ig_user_id = kv_get(conn, "ig_user_id")
-    page_id = kv_get(conn, "page_id")
-    token = load_token(conn, "meta_page", page_id) if page_id else None
-    token = token or load_token(conn, "meta_user")
+    token, _provider = active_token(conn)
     if not token or not ig_user_id:
-        raise GraphError("Instagram не подключён. Выполните вход через Meta на странице «Подключение API».")
+        raise GraphError("Instagram не подключён. Выполните вход через Meta на странице «API».")
+    if kv_get(conn, "reauth_required"):
+        raise GraphError("Нужен повторный вход через Meta: " + (kv_get(conn, "reauth_required") or ""), code=190)
     return GraphClient(token), ig_user_id
 
 
@@ -103,8 +103,13 @@ def sync_competitor(conn: sqlite3.Connection, client: GraphClient, my_ig_user_id
             if not after or not items:
                 break
     except GraphError as exc:
-        status = "not_professional" if exc.code == 110 or "business" in str(exc).lower() else "error"
-        conn.execute("UPDATE accounts SET discovery_status=?, discovery_detail=? WHERE id=?", (status, str(exc)[:300], acc_id))
+        if exc.kind in {"token", "rate_limit", "network"}:
+            raise  # общая проблема, а не свойство конкретного конкурента
+        # Business Discovery возвращает ошибку для личных, несуществующих и недоступных аккаунтов;
+        # различить эти случаи по ответу надёжно нельзя, поэтому статус — «недоступен» с текстом ошибки.
+        status = "not_professional" if exc.code == 110 else "error"
+        conn.execute("UPDATE accounts SET discovery_status=?, discovery_detail=? WHERE id=?",
+                     (status, f"HTTP {exc.status}, code {exc.code}: {exc}"[:300], acc_id))
         conn.commit()
         return {"ok": False, "error": str(exc), "media": total}
     conn.commit()
