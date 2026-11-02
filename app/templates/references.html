@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Библиотека референсов</h1>
+<p class="muted">ffmpeg: {{ 'есть' if ffmpeg else 'НЕ установлен' }} · транскрипция faster-whisper: {{ 'есть' if whisper else 'не установлена — загрузите .srt/.vtt/.txt' }}</p>
+<section class="card"><h2>Импорт MP4</h2>
+<form method="post" action="/references/upload" enctype="multipart/form-data" class="stack">
+  <input name="title" placeholder="Название" required>
+  <input name="author" placeholder="Автор (например @aironzak или «мой ролик»)">
+  <input name="source_url" placeholder="Ссылка на оригинал">
+  <input name="rights_note" placeholder="Основание хранения (мой ролик / разрешение автора / для внутреннего анализа)">
+  <input name="tags" placeholder="Теги через запятую">
+  <label>Видео (MP4/MOV) <input type="file" name="video" accept="video/mp4,video/quicktime" required></label>
+  <label>Субтитры (необязательно, .srt/.vtt/.txt) <input type="file" name="subtitles" accept=".srt,.vtt,.txt"></label>
+  <button>Загрузить и разобрать</button>
+</form>
+<p class="muted">Приложение не скачивает видео из Instagram. Загружайте только файлы, которые у вас уже есть на законных основаниях.</p>
+</section>
+<div class="cards">
+{% for r in refs %}
+<a class="refcard" href="/references/{{ r.id }}">
+  {% set kf = r.keyframes|fromjson %}
+  {% if kf %}<img src="/frames/{{ r.id }}/{{ kf[0].path.split('/')[-1] }}" alt="">{% endif %}
+  <b>{{ r.title }}</b><small>{{ r.author or '' }} · {{ r.duration_sec|num(1, ' с') }} · {{ 'разобран Claude' if r.analysis_md else 'без разбора' }}</small>
+</a>
+{% else %}<p class="muted">Пока пусто.</p>{% endfor %}
+</div>
+{% endblock %}

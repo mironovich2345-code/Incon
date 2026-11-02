@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Сценарии и раскадровки</h1>
+<section class="card"><h2>Новый сценарий</h2>
+<form method="post" action="/scripts/generate" class="stack">
+  <div class="row">
+    <select name="topic">{% for t in TOPICS %}<option>{{ t }}</option>{% endfor %}</select>
+    <select name="format">{% for t in FORMATS %}<option>{{ t }}</option>{% endfor %}</select>
+    <select name="hook_type">{% for t in HOOKS %}<option>{{ t }}</option>{% endfor %}</select>
+    <input name="duration" type="number" value="40" min="10" max="90" size="4"> с
+  </div>
+  <label>Слот плана: <select name="plan_id"><option value="">—</option>{% for p in plan %}<option value="{{ p.id }}">{{ p.day }} #{{ p.slot }} · {{ p.topic }} · {{ p.format }} · {{ p.hook_type }}</option>{% endfor %}</select></label>
+  <fieldset><legend>Референсы (переносим приёмы, не содержание)</legend>
+    {% for r in refs %}<label class="chk"><input type="checkbox" name="ref_ids" value="{{ r.id }}"> {{ r.title }}</label>{% else %}<span class="muted">нет</span>{% endfor %}
+  </fieldset>
+  <div class="row">
+    <label class="chk"><input type="radio" name="mode" value="template" checked> Шаблон-каркас</label>
+    <label class="chk"><input type="radio" name="mode" value="claude"> Claude{% if not claude_ok %} (не настроен — будет сохранён промпт){% endif %}</label>
+    <button>Создать</button>
+  </div>
+</form>
+</section>
+<table><thead><tr><th>#</th><th>Название</th><th>Хук</th><th>Генератор</th><th>Статус</th><th>Создан</th></tr></thead><tbody>
+{% for s in scripts %}<tr><td>{{ s.id }}</td><td><a href="/scripts/{{ s.id }}">{{ s.title }}</a></td><td>{{ s.hook_type }}</td><td>{{ s.generator }}</td><td>{{ s.status }}</td><td>{{ s.created_at }}</td></tr>{% endfor %}
+</tbody></table>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ ref.title }}</h1>
+<p class="muted">{{ ref.author or '' }} {% if ref.source_url %}· <a href="{{ ref.source_url }}" target="_blank" rel="noopener">оригинал</a>{% endif %} · {{ ref.width }}×{{ ref.height }} · основание: {{ ref.rights_note or 'не указано' }}</p>
+<section class="card"><h2>Автоматический разбор</h2>
+<div class="kpis">
+  <div class="kpi"><span>Длительность</span><b>{{ structure.duration_sec|num(1, ' с') }}</b></div>
+  <div class="kpi"><span>Склеек</span><b>{{ structure.cuts_count|num }}</b></div>
+  <div class="kpi"><span>Склеек на 10 с</span><b>{{ structure.cuts_per_10s|num(1) }}</b></div>
+  <div class="kpi"><span>Средний план</span><b>{{ structure.avg_shot_sec|num(1, ' с') }}</b></div>
+  <div class="kpi"><span>Первая склейка</span><b>{{ structure.first_cut_sec|num(1, ' с') }}</b></div>
+  <div class="kpi"><span>Слов в минуту</span><b>{{ structure.words_per_min|num }}</b></div>
+</div>
+<p><b>Хук (0–3 с):</b> {{ structure.hook_text_first_3s or '— нет транскрипта с таймкодами' }}</p>
+{% if structure.beats %}<ul>{% for k, v in structure.beats.items() %}<li><b>{{ k }}:</b> {{ v }}</li>{% endfor %}</ul>{% endif %}
+<p class="muted">Не измеряется автоматически: {{ (structure.not_measured or [])|join(', ') }}.</p>
+</section>
+<section class="card"><h2>Ключевые кадры</h2>
+<div class="frames">{% for k in ref.keyframes|fromjson %}<figure><img src="/frames/{{ ref.id }}/{{ k.path.split('/')[-1] }}" alt=""><figcaption>{{ k.t }} с · {{ k.kind }}</figcaption></figure>{% endfor %}</div>
+</section>
+<section class="card"><h2>Транскрипт <small>({{ ref.transcript_source }})</small></h2><pre class="md">{{ ref.transcript or 'нет' }}</pre></section>
+<section class="card"><h2>Разбор структуры и монтажа</h2>
+{% if claude_ok %}<form method="post" action="/references/{{ ref.id }}/analyze"><button>Разобрать с Claude (кадры + транскрипт)</button></form>
+{% else %}<p class="muted">Claude API не настроен. Скопируйте промпт ниже в Claude вместе с кадрами и вставьте ответ в поле разбора.</p>
+<details><summary>Промпт</summary><pre class="md">{{ prompt }}</pre></details>{% endif %}
+<form method="post" action="/references/{{ ref.id }}/analysis" class="stack">
+  <textarea name="analysis_md" rows="14" placeholder="Разбор">{{ ref.analysis_md or '' }}</textarea><button>Сохранить разбор</button>
+</form>
+</section>
+{% endblock %}

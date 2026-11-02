@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Мои Reels</h1>
+<section class="card">
+  <h2>Сравнение по:
+    {% for g, l in [('format','формату'),('topic','теме'),('hook_type','хуку'),('published_at','дате')] %}
+      <a class="pill {{ 'on' if group==g }}" href="?group={{ g }}&sort={{ sort }}">{{ l }}</a>
+    {% endfor %}
+  </h2>
+  {% include "_groups.html" %}
+</section>
+<section class="card">
+  <h2>Список ({{ reels|length }})
+    <small>сортировка:
+    {% for s, l in [('views','просмотры'),('reach','охват'),('follows','подписки'),('avg_watch_time_ms','время просмотра'),('leads','заявки'),('published_at','дата')] %}
+      <a class="pill {{ 'on' if sort==s }}" href="?sort={{ s }}&group={{ group }}">{{ l }}</a>
+    {% endfor %}</small></h2>
+  <div class="scroll"><table class="dense">
+  <thead><tr><th>Дата</th><th>Хук / подпись</th><th>Просм.</th><th>Охват</th><th>Лайки</th><th>Комм.</th><th>Репосты</th><th>Сохр.</th><th>Ср. просм., с</th><th>Подписки</th><th>Skip</th><th>Источник</th><th>Разметка и заявки</th></tr></thead>
+  <tbody>
+  {% for r in reels %}
+  <tr>
+    <td>{{ (r.published_at or '')[:10] }}</td>
+    <td class="wide"><a href="{{ r.permalink or '#' }}" target="_blank" rel="noopener">{{ (r.hook_text or r.caption or '—')[:90] }}</a></td>
+    <td>{{ r.views|num }}</td><td>{{ r.reach|num }}</td><td>{{ r.likes|num }}</td><td>{{ r.comments|num }}</td>
+    <td>{{ r.shares|num }}</td><td>{{ r.saved|num }}</td><td>{{ r.avg_watch_sec|num(1) }}</td><td>{{ r.follows|num }}</td>
+    <td>{{ (r.skip_rate)|num(1) }}</td><td><small>{{ r.metrics_source }}</small></td>
+    <td>
+      <form method="post" action="/media/{{ r.id }}/edit" class="mini">
+        <input type="hidden" name="next" value="/reels?sort={{ sort }}&group={{ group }}">
+        <select name="format"><option value="">формат?</option>{% for f in FORMATS %}<option {{ 'selected' if r.format==f }}>{{ f }}</option>{% endfor %}</select>
+        <select name="topic"><option value="">тема?</option>{% for f in TOPICS %}<option {{ 'selected' if r.topic==f }}>{{ f }}</option>{% endfor %}</select>
+        <select name="hook_type"><option value="">хук?</option>{% for f in HOOKS %}<option {{ 'selected' if r.hook_type==f }}>{{ f }}</option>{% endfor %}</select>
+        <input name="hook_text" value="{{ r.hook_text or '' }}" placeholder="текст хука">
+        <input name="duration_sec" value="{{ r.duration_sec if r.duration_sec is not none else '' }}" placeholder="длит., с" size="5">
+        <input name="leads" value="{{ r.leads if r.leads is not none else '' }}" placeholder="заявки" size="4">
+        <button>✓</button> <small>{{ r.classification_source or '' }}</small>
+      </form>
+    </td>
+  </tr>
+  {% else %}<tr><td colspan="13" class="muted">Нет данных. <a href="/import">Импортируйте CSV</a> или подключите API.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

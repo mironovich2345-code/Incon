@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>@{{ acc.username }}</h1>
+<p>{{ acc.name or '' }} {% if acc.biography %}— <span class="muted">{{ acc.biography }}</span>{% endif %}</p>
+<div class="kpis">
+  <div class="kpi"><span>Медиана</span><b>{{ stats.median|num }}</b><small>{{ stats.basis }}, n={{ stats.n }}</small></div>
+  <div class="kpi"><span>Порог выброса</span><b>×{{ stats.ratio_threshold }}</b></div>
+  <div class="kpi"><span>MAD</span><b>{{ stats.mad|num }}</b></div>
+</div>
+<section class="card"><h2>Паттерны выбросов</h2>{% include "_patterns.html" %}</section>
+<section class="card"><h2>История подписчиков</h2>
+<table class="dense"><tr><th>Дата</th><th>Подписчики</th><th>Публикаций</th><th>Источник</th></tr>
+{% for h in history %}<tr><td>{{ h.captured_on }}</td><td>{{ h.followers_count|num }}</td><td>{{ h.media_count|num }}</td><td>{{ h.source }}</td></tr>{% else %}<tr><td colspan="4" class="muted">Нет снимков</td></tr>{% endfor %}
+</table></section>
+<section class="card"><h2>Публикации ({{ items|length }})</h2>
+<div class="scroll"><table class="dense">
+<thead><tr><th>Дата</th><th>Хук / подпись</th><th>Тип</th><th>Просмотры</th><th>Лайки</th><th>Комм.</th><th>× медианы</th><th>robust z</th><th>Разметка</th></tr></thead>
+<tbody>
+{% for i in items %}
+<tr class="{{ 'hot' if i.is_outlier }}">
+  <td>{{ (i.published_at or '')[:10] }}</td>
+  <td class="wide"><a href="{{ i.permalink or '#' }}" target="_blank" rel="noopener">{{ (i.hook_text or i.caption or '—')[:100] }}</a></td>
+  <td><small>{{ i.media_product_type or i.media_type or '' }}</small></td>
+  <td>{{ i.views|num }}</td><td>{{ i.likes|num }}</td><td>{{ i.comments|num }}</td>
+  <td>{{ i.outlier_ratio|num(2) }}</td><td>{{ i.robust_z|num(1) }}</td>
+  <td>
+    <form method="post" action="/media/{{ i.id }}/edit" class="mini">
+      <input type="hidden" name="next" value="/competitors/{{ acc.id }}">
+      <select name="format"><option value="">формат?</option>{% for f in FORMATS %}<option {{ 'selected' if i.format==f }}>{{ f }}</option>{% endfor %}</select>
+      <select name="topic"><option value="">тема?</option>{% for f in TOPICS %}<option {{ 'selected' if i.topic==f }}>{{ f }}</option>{% endfor %}</select>
+      <select name="hook_type"><option value="">хук?</option>{% for f in HOOKS %}<option {{ 'selected' if i.hook_type==f }}>{{ f }}</option>{% endfor %}</select>
+      <input name="hook_text" value="{{ i.hook_text or '' }}" placeholder="хук">
+      <button>✓</button>
+    </form>
+  </td>
+</tr>
+{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

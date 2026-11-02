@@ -1,0 +1,8 @@
+<div class="grid3">
+{% for field, label in [('format','Форматы'),('topic','Темы'),('hook_type','Хуки')] %}
+<div><h3>{{ label }}</h3><table class="dense"><thead><tr><th></th><th>всего</th><th>в выбросах</th><th>lift</th></tr></thead><tbody>
+{% for p in patterns[field] %}<tr><td>{{ p.value }}</td><td>{{ p.n }}</td><td>{{ p.n_outliers }}</td><td>{{ p.lift|num(2) }}</td></tr>{% endfor %}
+</tbody></table></div>
+{% endfor %}
+</div>
+<p class="muted">lift &gt; 1 — признак чаще встречается среди роликов-выбросов, чем в среднем по выборке. Разметка автоматическая (rules) — проверяйте вручную.</p>

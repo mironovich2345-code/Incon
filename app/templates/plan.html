@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Контент-план</h1>
+<section class="card"><h2>Эксперимент: 25 Reels за 5 дней</h2>
+<p>Латинский квадрат 5×5: каждый день — все 5 форматов; каждая тема и каждый тип хука — ровно один раз в день и один раз в каждом слоте. Это позволяет сравнить форматы, темы и хуки без смешения с днём и временем публикации.</p>
+<form method="post" action="/plan/create" class="row inline">
+  <label>Старт <input type="date" name="start" value="{{ default_start }}" required></label>
+  <label class="chk"><input type="checkbox" name="replace" value="1"> заменить существующие слоты</label>
+  <button>Сгенерировать план</button>
+</form>
+<p class="muted">При 208 подписчиках разброс просмотров высокий; 5 роликов на группу — это гипотезы для следующей серии, а не окончательные выводы.</p>
+</section>
+{% for day, items in days.items() %}
+<section class="card"><h2>{{ day }}</h2>
+<div class="scroll"><table class="dense"><thead><tr><th>#</th><th>Тема</th><th>Формат</th><th>Хук</th><th>Сценарий</th><th>Результат</th><th>Статус / заметки / ролик</th></tr></thead><tbody>
+{% for p in items %}<tr>
+  <td>{{ p.slot }}</td><td>{{ p.topic }}</td><td>{{ p.format }}</td><td>{{ p.hook_type }}</td>
+  <td>{% if p.script_id %}<a href="/scripts/{{ p.script_id }}">{{ p.script_title }}</a>{% else %}<a href="/scripts">создать</a>{% endif %}</td>
+  <td>{% if p.media_id %}<a href="{{ p.permalink or '#' }}" target="_blank" rel="noopener">{{ p.views|num }} просм.</a>{% else %}—{% endif %}</td>
+  <td><form method="post" action="/plan/{{ p.id }}" class="mini">
+    <input name="title" value="{{ p.title or '' }}" placeholder="рабочее название">
+    <select name="status">{% for st in ['planned','scripted','filmed','edited','published'] %}<option {{ 'selected' if p.status==st }}>{{ st }}</option>{% endfor %}</select>
+    <select name="media_id"><option value="">ролик?</option>{% for m in own_media %}<option value="{{ m.id }}" {{ 'selected' if p.media_id==m.id }}>{{ (m.published_at or '')[:10] }} {{ (m.permalink or '')[-14:] }}</option>{% endfor %}</select>
+    <input name="notes" value="{{ p.notes or '' }}" placeholder="заметки"><button>✓</button>
+  </form></td>
+</tr>{% endfor %}
+</tbody></table></div></section>
+{% else %}<p class="muted">План пуст.</p>{% endfor %}
+{% endblock %}

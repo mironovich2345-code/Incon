@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Рейтинг успешных Reels</h1>
+<p class="muted">Ранжирование по кратности к медиане своего же аккаунта — так ролики аккаунтов разного размера сравнимы. Основа метрики указана в каждой строке.</p>
+<section class="card"><h2>Что общего у лидеров</h2>{% include "_patterns.html" %}</section>
+<div class="scroll"><table class="dense">
+<thead><tr><th>#</th><th>Аккаунт</th><th>Хук / подпись</th><th>× медианы</th><th>Основа</th><th>Просмотры</th><th>Лайки</th><th>Комм.</th><th>Формат</th><th>Тема</th><th>Хук</th></tr></thead>
+<tbody>
+{% for t in top %}
+<tr class="{{ 'own' if t.is_own }}">
+  <td>{{ loop.index }}</td><td>@{{ t.username }}</td>
+  <td class="wide"><a href="{{ t.permalink or '#' }}" target="_blank" rel="noopener">{{ (t.hook_text or t.caption or '—')[:90] }}</a></td>
+  <td><b>{{ t.outlier_ratio|num(2) }}</b></td><td><small>{{ t.score_basis }}</small></td>
+  <td>{{ t.views|num }}</td><td>{{ t.likes|num }}</td><td>{{ t.comments|num }}</td>
+  <td>{{ t.format or '—' }}</td><td>{{ t.topic or '—' }}</td><td>{{ t.hook_type or '—' }}</td>
+</tr>
+{% else %}<tr><td colspan="11" class="muted">Нет данных</td></tr>{% endfor %}
+</tbody></table></div>
+{% endblock %}

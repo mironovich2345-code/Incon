@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ s.title }}</h1>
+<p class="muted">Хук: {{ s.hook_type }} · генератор: {{ s.generator }}</p>
+{% if storyboard %}
+<section class="card"><h2>Раскадровка</h2>
+<div class="scroll"><table class="dense"><thead><tr><th>Время</th><th>План</th><th>Действие</th><th>Речь</th><th>Текст на экране</th><th>Монтаж</th></tr></thead><tbody>
+{% for b in storyboard %}<tr><td>{{ b.t_start }}–{{ b.t_end }} с</td><td>{{ b.shot }}</td><td>{{ b.action or '' }}</td><td>{{ b.speech }}</td><td>{{ b.on_screen_text }}</td><td>{{ b.edit }}</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endif %}
+<form method="post" action="/scripts/{{ s.id }}" class="stack card">
+  <textarea name="body_md" rows="24">{{ s.body_md }}</textarea>
+  <div class="row"><select name="status">{% for st in ['draft','ready','filmed'] %}<option {{ 'selected' if s.status==st }}>{{ st }}</option>{% endfor %}</select><button>Сохранить</button></div>
+</form>
+{% endblock %}

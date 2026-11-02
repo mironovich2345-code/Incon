@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Публикации на утверждение</h1>
+<div class="flash warn">Автопубликация отключена. «Утверждено» означает: можно публиковать вручную в приложении Instagram.</div>
+<section class="card"><h2>Новый черновик</h2>
+<form method="post" action="/drafts/new" enctype="multipart/form-data" class="stack">
+  <div class="row">
+    <select name="plan_id"><option value="">слот плана —</option>{% for p in plan %}<option value="{{ p.id }}">{{ p.day }} #{{ p.slot }} · {{ p.topic }}</option>{% endfor %}</select>
+    <select name="script_id"><option value="">сценарий —</option>{% for s in scripts %}<option value="{{ s.id }}">{{ s.title }}</option>{% endfor %}</select>
+    <input type="datetime-local" name="scheduled_for">
+  </div>
+  <textarea name="caption" rows="6" placeholder="Подпись (до 2200 символов, до 30 хэштегов)"></textarea>
+  <input name="cover_note" placeholder="Обложка: кадр / текст">
+  <label>Смонтированный ролик <input type="file" name="video" accept="video/*"></label>
+  <button>Создать черновик</button>
+</form></section>
+<table><thead><tr><th>#</th><th>Слот</th><th>Подпись</th><th>Статус</th><th>Обновлён</th></tr></thead><tbody>
+{% for d in drafts %}<tr><td><a href="/drafts/{{ d.id }}">{{ d.id }}</a></td><td>{{ d.day or '' }} {{ ('#' ~ d.slot) if d.slot else '' }}</td><td>{{ (d.caption or '')[:80] }}</td><td><span class="tag {{ d.status }}">{{ DRAFT_STATUS[d.status] }}</span></td><td>{{ d.updated_at }}</td></tr>{% endfor %}
+</tbody></table>
+{% endblock %}

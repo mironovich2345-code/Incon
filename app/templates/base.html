@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Content Intelligence{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/">Content Intelligence</a>
+  <nav>
+    <a href="/">Обзор</a>
+    <a href="/reels">Мои Reels</a>
+    <a href="/competitors">Конкуренты</a>
+    <a href="/top">Рейтинг</a>
+    <a href="/references">Референсы</a>
+    <a href="/scripts">Сценарии</a>
+    <a href="/plan">Контент-план</a>
+    <a href="/drafts">Утверждение</a>
+    <a href="/reports">Отчёты</a>
+    <a href="/metrics">Метрики</a>
+    <a href="/import">Импорт</a>
+    <a href="/connect">API</a>
+  </nav>
+</header>
+<main>
+  {% if flash %}<div class="flash ok">{{ flash }}</div>{% endif %}
+  {% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+<footer>«—» = нет данных (метрика недоступна или не загружена). Значения не оцениваются и не подставляются.</footer>
+</body>
+</html>

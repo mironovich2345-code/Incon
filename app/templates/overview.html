@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Обзор аккаунта{% if own %} @{{ own.username }}{% endif %}</h1>
+{% if not own %}
+<section class="card">
+  <h2>Укажите ваш аккаунт</h2>
+  <form method="post" action="/own" class="row">
+    <input name="username" placeholder="ваш_username" required>
+    <input name="followers" type="number" placeholder="подписчиков сейчас (например 208)">
+    <button>Сохранить</button>
+  </form>
+  <p class="muted">Пароль от Instagram не нужен и не запрашивается.</p>
+</section>
+{% else %}
+<div class="kpis">
+  <div class="kpi"><span>Подписчики</span><b>{{ summary.followers_now|num }}</b>
+    {% if summary.followers_first is not none and summary.followers_now is not none %}<small>{{ (summary.followers_now - summary.followers_first)|num }} с первого снимка</small>{% endif %}</div>
+  <div class="kpi"><span>Reels в базе</span><b>{{ summary.reels_count }}</b></div>
+  <div class="kpi"><span>Медиана просмотров</span><b>{{ summary.median_views|num }}</b><small>n={{ summary.n_views }}</small></div>
+  <div class="kpi"><span>Медиана ср. просмотра</span><b>{{ summary.median_avg_watch_sec|num(1, ' с') }}</b><small>n={{ summary.n_watch }}</small></div>
+  <div class="kpi"><span>Подписки с Reels</span><b>{{ summary.total_follows_from_reels|num }}</b></div>
+  <div class="kpi"><span>B2B-заявки</span><b>{{ summary.total_leads|num }}</b><small>ручной ввод</small></div>
+</div>
+<form method="post" action="/own" class="row inline">
+  <input type="hidden" name="username" value="{{ own.username }}">
+  <input name="followers" type="number" placeholder="подписчиков сегодня" required>
+  <button>Записать снимок подписчиков</button>
+</form>
+
+<section class="card">
+  <h2>Форматы (медианы)</h2>
+  {% include "_groups.html" with context %}
+</section>
+<div class="grid2">
+<section class="card">
+  <h2>Топ-5 Reels по просмотрам</h2>
+  <ol>{% for r in top %}<li><a href="{{ r.permalink or '#' }}" target="_blank" rel="noopener">{{ (r.hook_text or r.caption or 'без подписи')[:70] }}</a> — {{ r.views|num }}</li>{% else %}<li class="muted">Импортируйте данные на странице «Импорт».</li>{% endfor %}</ol>
+</section>
+<section class="card">
+  <h2>Сегодня по плану</h2>
+  <ul>{% for p in plan_today %}<li>#{{ p.slot }} {{ p.topic }} · {{ p.format }} · хук: {{ p.hook_type }} — <i>{{ p.status }}</i></li>{% else %}<li class="muted">Нет слотов на сегодня. <a href="/plan">Контент-план</a></li>{% endfor %}</ul>
+  <h2>Ждут утверждения: {{ pending|length }}</h2>
+  <ul>{% for d in pending %}<li><a href="/drafts/{{ d.id }}">Черновик #{{ d.id }}</a></li>{% endfor %}</ul>
+</section>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Черновик #{{ d.id }} <span class="tag {{ d.status }}">{{ DRAFT_STATUS[d.status] }}</span></h1>
+{% if problems %}<div class="flash warn">Проверка: {{ problems|join('; ') }}</div>{% endif %}
+<div class="grid2">
+<form method="post" action="/drafts/{{ d.id }}/edit" class="stack card">
+  <h2>Публикация</h2>
+  <textarea name="caption" rows="10">{{ d.caption or '' }}</textarea>
+  <small>{{ (d.caption or '')|length }} / 2200 символов</small>
+  <input name="cover_note" value="{{ d.cover_note or '' }}" placeholder="обложка">
+  <input type="datetime-local" name="scheduled_for" value="{{ d.scheduled_for or '' }}">
+  <p>Видео: {{ d.video_path.split('/')[-1] if d.video_path else 'не прикреплено' }}</p>
+  <button>Сохранить</button>
+</form>
+<section class="card"><h2>Согласование</h2>
+{% for st in allowed %}
+<form method="post" action="/drafts/{{ d.id }}/transition" class="row">
+  <input type="hidden" name="to_status" value="{{ st }}">
+  {% if st in ['rejected','changes_requested','approved'] %}<input name="comment" placeholder="комментарий">{% endif %}
+  <button>{{ {'pending_approval':'Отправить на утверждение','approved':'Утвердить','rejected':'Отклонить','changes_requested':'Вернуть на правки','draft':'Вернуть в черновик'}[st] }}</button>
+</form>
+{% endfor %}
+{% if d.reviewer_comment %}<p><b>Комментарий:</b> {{ d.reviewer_comment }}</p>{% endif %}
+<h3>История</h3>
+<ul>{% for e in events %}<li>{{ e.at }}: {{ e.from_status or '∅' }} → {{ e.to_status }} {{ e.comment or '' }}</li>{% endfor %}</ul>
+</section>
+</div>
+{% endblock %}

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Конкуренты</h1>
+<form method="post" action="/competitors/add" class="row inline"><input name="username" placeholder="@username или ссылка" required><button>Добавить</button></form>
+<div class="scroll"><table>
+<thead><tr><th>Аккаунт</th><th>Отслеживается</th><th>Business Discovery</th><th>Подписчики</th><th>Публикаций в базе</th><th>Медиана</th><th>Основа медианы</th><th>Выбросы ×{{ settings.outlier_ratio }}</th><th>Последняя</th></tr></thead>
+<tbody>
+{% for c in comps %}
+<tr class="{{ '' if c.tracked else 'small' }}">
+  <td><a href="/competitors/{{ c.id }}">@{{ c.username }}</a></td>
+  <td><form method="post" action="/competitors/{{ c.id }}/toggle"><button class="link">{{ 'да' if c.tracked else 'нет' }}</button></form></td>
+  <td><span class="tag {{ c.discovery_status }}">{{ {'ok':'доступен','not_professional':'не проф. аккаунт','error':'ошибка','not_checked':'не проверялся'}.get(c.discovery_status, c.discovery_status) }}</span>
+    {% if c.discovery_detail %}<br><small>{{ c.discovery_detail }}</small>{% endif %}</td>
+  <td>{{ c.followers|num }} {% if c.followers_on %}<small>на {{ c.followers_on }}</small>{% endif %}</td>
+  <td>{{ c.posts }}</td><td>{{ c.median|num }}</td><td><small>{{ c.basis }} (n={{ c.n }})</small></td>
+  <td>{{ c.outliers }}</td><td>{{ (c.last_post or '')[:10] }}</td>
+</tr>
+{% endfor %}
+</tbody></table></div>
+<p class="muted">Источники: Business Discovery (только профессиональные аккаунты, после подключения API) или ручной импорт публично видимых показателей на странице «Импорт». Охват, сохранения, репосты и удержание чужих роликов недоступны.</p>
+{% endblock %}

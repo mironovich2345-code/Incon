@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Подключение Instagram API</h1>
+<section class="card">
+<p>Режим: <b>{{ 'API включён' if settings.meta_api_enabled else 'ручной импорт (API выключен)' }}</b> ·
+Meta-приложение: <b>{{ 'настроено' if settings.meta_configured else 'не настроено' }}</b> · Graph API {{ settings.graph_api_version }}</p>
+<p>Архитектура: <b>Instagram API with Facebook Login for Business</b> — нужна для Business Discovery (данные конкурентов). Вход выполняется на сайте Meta; приложение получает токен, а не пароль. Публикация не запрашивается (разрешение <code>instagram_content_publish</code> не используется).</p>
+{% if settings.meta_api_enabled and settings.meta_configured %}
+  <a class="button" href="/meta/login">Войти через Meta</a>
+  <form method="post" action="/meta/sync" class="row inline">
+    <button name="scope" value="all">Синхронизировать всё</button>
+    <button name="scope" value="own">Только мой аккаунт</button>
+    <button name="scope" value="competitors">Только конкуренты</button>
+  </form>
+  <p class="muted">Последняя синхронизация: {{ last_sync or 'не было' }} · IG user id: {{ ig_user_id or '—' }}</p>
+{% else %}
+  <p class="muted">Чтобы включить: создайте Meta-приложение по инструкции <code>docs/04-meta-app-setup.md</code>, заполните .env и установите META_API_ENABLED=true.</p>
+{% endif %}
+</section>
+<section class="card"><h2>Токены на сервере</h2>
+<p class="muted">Хранятся в зашифрованном виде (Fernet). Значения токенов не показываются.</p>
+<table class="dense"><tr><th>Тип</th><th>Объект</th><th>Права</th><th>Истекает</th><th>Получен</th></tr>
+{% for t in tokens %}<tr><td>{{ t.provider }}</td><td>{{ t.subject }}</td><td><small>{{ t.scopes or '' }}</small></td><td>{{ t.expires_at or 'без фикс. срока' }}</td><td>{{ t.created_at }}</td></tr>{% else %}<tr><td colspan="5" class="muted">Нет</td></tr>{% endfor %}
+</table>
+{% if tokens %}<form method="post" action="/meta/disconnect"><button class="danger">Удалить токены</button></form>{% endif %}
+</section>
+{% endblock %}

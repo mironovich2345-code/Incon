@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Доступность метрик</h1>
+<p>Каталог составлен по документации Meta (см. <code>docs/01-meta-api-research.md</code>). Колонка «Проверка API» заполняется автоматически при синхронизации: какие метрики Meta реально вернула для вашего аккаунта.</p>
+{% for scope, items in groups.items() %}
+<section class="card"><h2>{{ scope_labels[scope] }}</h2>
+<div class="scroll"><table class="dense">
+<thead><tr><th>Метрика</th><th>Имя в API</th><th>Статус по документации</th><th>Проверка API</th><th>Ручной ввод</th><th>Комментарий</th></tr></thead>
+<tbody>
+{% for m in items %}{% set c = checks.get((m.api_name, scope)) %}
+<tr>
+  <td>{{ m.label }}</td><td><code>{{ m.api_name or '—' }}</code></td>
+  <td><span class="tag {{ m.status }}">{{ status_labels[m.status] }}</span></td>
+  <td>{% if c %}<span class="tag {{ 'ok' if c.status=='available' else 'error' }}">{{ 'вернулась' if c.status=='available' else 'недоступна' }}</span> <small>{{ c.checked_at }}</small>{% if c.detail %}<br><small>{{ c.detail }}</small>{% endif %}{% else %}<small class="muted">не проверялось</small>{% endif %}</td>
+  <td>{{ 'да' if m.manual_ok else 'нет' }}</td><td><small>{{ m.note }}</small></td>
+</tr>
+{% endfor %}
+</tbody></table></div></section>
+{% endfor %}
+{% endblock %}

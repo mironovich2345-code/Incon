@@ -1,0 +1,17 @@
+{% set groups = groups if groups is defined else by_format %}
+<div class="scroll"><table>
+<thead><tr><th>Группа</th><th>Роликов</th><th>Просмотры</th><th>Охват</th><th>Ср. просмотр, с</th><th>Досмотр, %</th><th>Подписки /1000</th><th>Репосты /1000</th><th>Сохр. /1000</th><th>Заявки</th></tr></thead>
+<tbody>
+{% for g in groups %}
+<tr class="{{ 'small' if g.count < 5 }}">
+  <td>{{ g.group }}</td><td>{{ g.count }}</td>
+  <td>{{ g.views|num }} <small>n={{ g.n_views }}</small></td>
+  <td>{{ g.reach|num }} <small>n={{ g.n_reach }}</small></td>
+  <td>{{ g.avg_watch_sec|num(1) }} <small>n={{ g.n_avg_watch_sec }}</small></td>
+  <td>{{ (g.watch_ratio * 100 if g.watch_ratio is not none else none)|num }} <small>n={{ g.n_watch_ratio }}</small></td>
+  <td>{{ g.follows_per_1k|num(1) }} <small>n={{ g.n_follows_per_1k }}</small></td>
+  <td>{{ g.shares_per_1k|num(1) }}</td><td>{{ g.saves_per_1k|num(1) }}</td><td>{{ g.leads|num }}</td>
+</tr>
+{% else %}<tr><td colspan="10" class="muted">Нет данных</td></tr>{% endfor %}
+</tbody></table></div>
+<p class="muted">Серые строки — меньше 5 роликов: вывод только как гипотеза. «Досмотр» = среднее время просмотра / длительность ролика.</p>

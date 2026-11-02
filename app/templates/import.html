@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Ручной импорт данных</h1>
+<p>MVP работает без API: данные берутся из приложения Instagram (Статистика), из экспорта Meta Business Suite или вводятся вручную. Пустая ячейка = «нет данных». Примеры файлов — в папке <code>samples/</code>.</p>
+<div class="grid3">
+<section class="card"><h2>Мои Reels</h2>
+<form method="post" action="/import/own_reels" enctype="multipart/form-data">
+  <input name="username" placeholder="ваш username" value="{{ own.username if own else '' }}">
+  <input type="file" name="file" accept=".csv,.txt" required><button>Импорт</button>
+</form>
+<p class="muted">Колонки: permalink, published_at, caption, duration_sec, views, reach, likes, comments, shares, saved, avg_watch_time_sec, follows, profile_visits, skip_rate, leads, format, topic, hook_type, hook_text.</p>
+</section>
+<section class="card"><h2>Аккаунт по дням</h2>
+<form method="post" action="/import/account_daily" enctype="multipart/form-data">
+  <input name="username" placeholder="ваш username" value="{{ own.username if own else '' }}">
+  <input type="file" name="file" accept=".csv,.txt" required><button>Импорт</button>
+</form>
+<p class="muted">Колонки: day, followers_count, reach, views, profile_views, accounts_engaged, total_interactions, follows, unfollows.</p>
+</section>
+<section class="card"><h2>Публикации конкурентов</h2>
+<form method="post" action="/import/competitor_posts" enctype="multipart/form-data">
+  <input name="username" placeholder="username (если нет колонки)">
+  <input type="file" name="file" accept=".csv,.txt" required><button>Импорт</button>
+</form>
+<p class="muted">Колонки: username, permalink, published_at, caption, media_type, views, likes, comments, captured_at. Только публично видимые числа, собранные вручную.</p>
+</section>
+</div>
+{% endblock %}
